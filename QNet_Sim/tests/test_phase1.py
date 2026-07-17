@@ -1,5 +1,9 @@
+#topology and network creation
 import sys
 import os
+
+M = 3  # Number of rows in the heavy hex lattice
+N = 4  # Number of columns in the heavy hex lattice
 
 # 1. Get the directory containing the current file
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -11,10 +15,12 @@ src_dir = os.path.abspath(os.path.join(current_dir, '../src'))
 sys.path.insert(0, src_dir)
 
 from network.topology import generate_chain
+from network.topology import generate_heavy_hex
 
 def main():
     print("Generating a chain topology of 5 nodes...")
-    network = generate_chain(5)
+    # network = generate_chain(5)
+    network = generate_heavy_hex(M, N)
 
     print("\nNodes in the network:")
     network.display_nodes()

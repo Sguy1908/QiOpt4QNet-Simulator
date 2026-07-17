@@ -1,3 +1,4 @@
+#fidelity degradation and purification tests
 import sys
 import os
 
