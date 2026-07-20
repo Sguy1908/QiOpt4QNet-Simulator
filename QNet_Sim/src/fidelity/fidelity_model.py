@@ -1,6 +1,9 @@
 class FidelityModel:
-
     
+    @staticmethod
+    def werner_parameter(f: float) -> float:
+        return (4 * f - 1) / 3.0
+
     @staticmethod
     def entanglement_swapping(f1: float, f2: float) -> float:
      
@@ -29,3 +32,5 @@ class FidelityModel:
             final_f = FidelityModel.entanglement_swapping(final_f, next_f)
             
         return final_f
+
+    
