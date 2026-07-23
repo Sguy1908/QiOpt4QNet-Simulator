@@ -6,6 +6,13 @@ build-backend = "hatchling.build"
 name = "qiopt4qnet"
 version = "0.1.0"
 description = "Quantum network optimization framework"
+dependencies = [
+    "simpy>=4.0",
+    "numpy",
+    "networkx",
+    "matplotlib",
+    "dimod"
+]
 
 [tool.pyright]
 include = ["src", "tests"]
