@@ -11,7 +11,9 @@ dependencies = [
     "numpy",
     "networkx",
     "matplotlib",
-    "dimod"
+    "dimod",
+    "openjij",
+    "pyqubo"
 ]
 
 [tool.pyright]
