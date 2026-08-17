@@ -7,7 +7,11 @@ from collections import defaultdict
 class TensorNetworkOptimizer:
     def __init__(self, bundles, edge_capacities, memory_capacities,
                  congestion_weight=0.0, congestion_threshold=0.7,
-                 risk_weight=0.0, risk_tau=1.0):
+                 risk_weight=0.0, risk_tau=1.0, order_strategy="greedy"):
+        if order_strategy not in ("greedy", "spectral"):
+            raise ValueError(
+                f"unknown order_strategy {order_strategy!r}; expected "
+                "'greedy' or 'spectral'")
         self.bundles = bundles
         self.edge_capacities = {self._undirected_edge(k): v for k, v in edge_capacities.items()}
         self.memory_capacities = memory_capacities
@@ -15,6 +19,7 @@ class TensorNetworkOptimizer:
         self.congestion_threshold = congestion_threshold
         self.risk_weight = risk_weight
         self.risk_tau = risk_tau
+        self.order_strategy = order_strategy
         self._greedy_sel = None
         self._validate()
         self._group_by_request()
@@ -107,6 +112,13 @@ class TensorNetworkOptimizer:
         if n <= 2:
             self._ordered_requests = list(self.requests)
             return
+        if self.order_strategy == "spectral":
+            self._ordered_requests = self._spectral_order(coupling)
+        else:
+            self._ordered_requests = self._greedy_order(coupling)
+
+    def _greedy_order(self, coupling):
+        n = len(self.requests)
         ordered = [self.requests[0]]
         remaining = set(range(1, n))
         current = 0
@@ -123,7 +135,70 @@ class TensorNetworkOptimizer:
                 remaining.remove(best_next)
             ordered.append(self.requests[best_next])
             current = best_next
-        self._ordered_requests = ordered
+        return ordered
+
+    def _spectral_order(self, coupling):
+        """Structural/spectral heuristic for the MPS coupling order: sorts
+        requests within each connected component of the coupling graph by
+        their Fiedler-vector value (the eigenvector of the second-smallest
+        eigenvalue of the graph Laplacian L = D - coupling). This is a
+        training-free, principled stand-in for a "learned" coupling order --
+        NOT a trained neural network -- based on the well-established
+        spectral-graph-theory result that the Fiedler vector orders a graph's
+        vertices to keep strongly-coupled nodes close together, which is
+        exactly what an MPS chain wants to minimize the bond dimension
+        needed for a given truncation accuracy.
+        """
+        n = len(self.requests)
+        # Union-find to get connected components of the coupling>0 graph.
+        parent = list(range(n))
+
+        def find(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a, b):
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                if coupling[i, j] > 0:
+                    union(i, j)
+
+        components = defaultdict(list)
+        for i in range(n):
+            components[find(i)].append(i)
+
+        # Order components deterministically: by descending total
+        # intra-component coupling weight, then by smallest member index.
+        def component_key(members):
+            total_weight = sum(coupling[a, b] for a in members for b in members if a < b)
+            return (-total_weight, min(members))
+
+        ordered_components = sorted(components.values(), key=component_key)
+
+        ordered_idx = []
+        for members in ordered_components:
+            if len(members) == 1:
+                ordered_idx.extend(members)
+                continue
+            sub = coupling[np.ix_(members, members)].astype(float)
+            degree = np.diag(sub.sum(axis=1))
+            laplacian = degree - sub
+            eigvals, eigvecs = np.linalg.eigh(laplacian)
+            # eigh sorts eigenvalues ascending; index 0 is ~0 (constant
+            # eigenvector for a connected component), index 1 is the
+            # Fiedler vector.
+            fiedler = eigvecs[:, 1] if len(members) > 1 else eigvecs[:, 0]
+            member_order = sorted(range(len(members)),
+                                  key=lambda k: (fiedler[k], members[k]))
+            ordered_idx.extend(members[k] for k in member_order)
+
+        return [self.requests[i] for i in ordered_idx]
 
     def _local_penalty(self, rid, bid):
         """Self-penalty: overload penalty plus quadratic congestion term (G1/G7).
@@ -206,7 +281,8 @@ class TensorNetworkOptimizer:
 
     def solve(self, edge_penalty=None, memory_penalty=None,
               congestion_penalty=0.05, memory_congestion_penalty=0.05,
-              bond_dim=8, beta=5.0, max_sweeps=0, mf_iters=25):
+              bond_dim=8, beta=5.0, max_sweeps=0, mf_iters=25,
+              adaptive_bond_dim=False, trunc_eps=1e-4, max_bond_dim=64):
         # Penalty defaults are anchored to the utility scale (B, D just above
         # the largest positive bundle utility, the manuscript's rule), so
         # omitting them can never silently under-enforce the capacity
@@ -250,16 +326,25 @@ class TensorNetworkOptimizer:
         #    a low-rank chain MPS cannot represent), so the default keeps the
         #    exact product form and treats the sweeps purely as an accuracy
         #    knob for users who want to trade runtime for them.
+        bond_dim_trace = [] if adaptive_bond_dim else None
         for _ in range(max_sweeps):
             for direction in ["left", "right"]:
                 if direction == "left":
                     for i in range(n - 1):
                         self._contract_bond(mps, i, i + 1, bond_dim, beta,
-                                            ordered, opt_maps, baked_share)
+                                            ordered, opt_maps, baked_share,
+                                            adaptive_bond_dim=adaptive_bond_dim,
+                                            trunc_eps=trunc_eps,
+                                            max_bond_dim=max_bond_dim,
+                                            trace=bond_dim_trace)
                 else:
                     for i in range(n - 2, -1, -1):
                         self._contract_bond(mps, i, i + 1, bond_dim, beta,
-                                            ordered, opt_maps, baked_share)
+                                            ordered, opt_maps, baked_share,
+                                            adaptive_bond_dim=adaptive_bond_dim,
+                                            trunc_eps=trunc_eps,
+                                            max_bond_dim=max_bond_dim,
+                                            trace=bond_dim_trace)
 
         # 3. Marginal decoder: contract the full MPS for per-option
         #    probabilities, committing requests by decimation (highest
@@ -285,7 +370,11 @@ class TensorNetworkOptimizer:
         final_energy = self._selection_energy(selections)
 
         selected = [(rid, bid) for rid, bid in selections.items() if bid is not None]
-        return {"selected": selected, "selections": selections, "energy": final_energy}
+        result = {"selected": selected, "selections": selections, "energy": final_energy}
+        if adaptive_bond_dim:
+            result["bond_dim_trace"] = bond_dim_trace
+            result["max_chi_used"] = max((t["chi_used"] for t in bond_dim_trace), default=0)
+        return result
 
     def _mean_field_bake(self, beta, mf_iters, ordered, opt_maps):
         """Build the mean-field baseline used for the MPS site tensors and the
@@ -655,7 +744,8 @@ class TensorNetworkOptimizer:
         return selections
 
     def _contract_bond(self, mps, left, right, bond_dim, beta, ordered, opt_maps,
-                       baked_share=None):
+                       baked_share=None, adaptive_bond_dim=False, trunc_eps=1e-4,
+                       max_bond_dim=64, trace=None):
         tl = mps[left]
         tr = mps[right]
         dl = tl.shape[0]
@@ -694,7 +784,26 @@ class TensorNetworkOptimizer:
         except np.linalg.LinAlgError:
             u, s, vh = np.linalg.svd(combined + 1e-12 * np.eye(combined.shape[0], combined.shape[1]),
                                      full_matrices=False)
-        k = min(bond_dim, len(s))
+
+        if adaptive_bond_dim:
+            # Truncation-error-driven bond dimension: grow chi to the
+            # smallest value that retains (1 - trunc_eps) of the singular
+            # value weight (sum of squares), capped by max_bond_dim.
+            total_weight = float(np.sum(s ** 2))
+            if total_weight <= 0.0:
+                k = 1
+            else:
+                cumulative = np.cumsum(s ** 2) / total_weight
+                k = int(np.searchsorted(cumulative, 1.0 - trunc_eps) + 1)
+                k = max(1, min(k, max_bond_dim, len(s)))
+            if trace is not None:
+                retained = float(np.sum(s[:k] ** 2))
+                trunc_weight = 1.0 - (retained / total_weight if total_weight > 0 else 1.0)
+                trace.append({"left": left, "right": right, "chi_used": k,
+                              "trunc_weight": trunc_weight})
+        else:
+            k = min(bond_dim, len(s))
+
         u = u[:, :k]
         s = s[:k]
         vh = vh[:k, :]

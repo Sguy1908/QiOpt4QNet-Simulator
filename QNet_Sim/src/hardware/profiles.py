@@ -29,6 +29,8 @@ class HardwareProfile:
     readout_error_rate: float
     bond_dim_max: int
     description: str
+    source: Optional[str] = None
+    source_url_or_doi: Optional[str] = None
 
 
 IDEAL_PROFILE = HardwareProfile(
@@ -36,39 +38,75 @@ IDEAL_PROFILE = HardwareProfile(
     t1_us=1e9, t2_us=1e9,
     anneal_time_us=1.0, gate_error_rate=0.0, readout_error_rate=0.0,
     bond_dim_max=512,
-    description="Noiseless reference: infinite coherence, no gate/readout errors.")
+    description="Noiseless reference: infinite coherence, no gate/readout errors. "
+                "Not a physical platform -- no literature source applies.")
 
 SUPERCONDUCTING_PROFILE = HardwareProfile(
     name="superconducting_2024",
-    t1_us=60.0, t2_us=40.0,
-    anneal_time_us=200.0, gate_error_rate=1e-3, readout_error_rate=5e-2,
+    t1_us=262.69, t2_us=176.67,
+    anneal_time_us=200.0, gate_error_rate=7.57e-3, readout_error_rate=1.35e-2,
     bond_dim_max=128,
-    description="Transmon QPUs (e.g. D-Wave/IBM-class): ~60us T1, ~40us T2, "
-                "CNOT error ~1e-3, mid-circuit readout ~5e-2, anneal <=200us.")
+    description="LITERATURE-CALIBRATED (not a physical hardware experiment). "
+                "IBM 127-qubit Eagle r3 processor (ibm_sherbrooke), reported "
+                "2024-08-01: median T1=262.69us, median T2=176.67us, median "
+                "two-qubit (ECR) error=7.57e-3, median readout error=1.35e-2.",
+    source="IBM Quantum, \"Eagle's quantum performance progress\" (ibm_sherbrooke, Eagle r3)",
+    source_url_or_doi="https://www.ibm.com/quantum/blog/eagle-quantum-processor-performance")
 
 ION_TRAP_PROFILE = HardwareProfile(
     name="ion_trap",
-    t1_us=2000.0, t2_us=1000.0,
-    anneal_time_us=50.0, gate_error_rate=1e-4, readout_error_rate=2e-2,
+    t1_us=5.0e7, t2_us=5.0e7,
+    anneal_time_us=50.0, gate_error_rate=1e-6, readout_error_rate=7e-4,
     bond_dim_max=256,
-    description="Trapped-ion QCCD: coherence in the ms range, gate error ~1e-4, "
-                "state prep/measurement ~2e-2.")
+    description="LITERATURE-CALIBRATED (not a physical hardware experiment). "
+                "Harty et al. (Oxford, 43Ca+ hyperfine qubit): memory coherence "
+                "T2*=50s, single-qubit gate error=1e-6 (99.9999% fidelity), "
+                "state-preparation-and-measurement (readout) error=7e-4 "
+                "(99.93% fidelity). The source characterizes a single T2* "
+                "dephasing time and does not separately report T1 (population "
+                "relaxation); T1 is conservatively set equal to T2 here as a "
+                "physically-motivated lower bound (T1 >= T2 always holds), not "
+                "an independently measured value.",
+    source="Harty et al., \"High-Fidelity Preparation, Gates, Memory, and "
+           "Readout of a Trapped-Ion Quantum Bit\", Phys. Rev. Lett. 113, "
+           "220501 (2014)",
+    source_url_or_doi="https://arxiv.org/abs/1403.1524")
 
 NEUTRAL_ATOM_PROFILE = HardwareProfile(
     name="neutral_atom",
-    t1_us=200.0, t2_us=150.0,
-    anneal_time_us=100.0, gate_error_rate=5e-4, readout_error_rate=5e-2,
+    t1_us=1.49e6, t2_us=1.49e6,
+    anneal_time_us=100.0, gate_error_rate=5e-3, readout_error_rate=1e-2,
     bond_dim_max=256,
-    description="Rydberg neutral-atom arrays: ~200us coherence, native Rydberg "
-                "gates ~5e-4, lower state-prep fidelity.")
+    description="LITERATURE-CALIBRATED (not a physical hardware experiment). "
+                "Coherence T2=1.49(8)s from Bluvstein et al. (Nature 604, 451, "
+                "2022, coherent atom transport); two-qubit Rydberg gate "
+                "error=5e-3 (99.5% fidelity) from Evered et al. (Nature 622, "
+                "268, 2023); readout error~1e-2, a typical value from a 2026 "
+                "review of the platform rather than one specific measurement. "
+                "T1 is not separately reported by these sources and is "
+                "conservatively set equal to T2 (T1 >= T2 lower bound), not "
+                "an independently measured value.",
+    source="Bluvstein et al., Nature 604, 451 (2022); Evered et al., Nature "
+           "622, 268 (2023)",
+    source_url_or_doi="https://doi.org/10.1038/s41586-022-04592-6")
 
 PHOTONIC_PROFILE = HardwareProfile(
     name="photonic",
-    t1_us=10000.0, t2_us=5000.0,
-    anneal_time_us=10.0, gate_error_rate=1e-5, readout_error_rate=1e-2,
+    t1_us=2.0e4, t2_us=2.0e4,
+    anneal_time_us=10.0, gate_error_rate=1e-5, readout_error_rate=0.15,
     bond_dim_max=512,
-    description="Photonic/fiber-memory platforms: ms-scale storage, near-lossless "
-                "gates, fast anneal; attractive long-term profile.")
+    description="LITERATURE-CALIBRATED (not a physical hardware experiment). "
+                "Rare-earth-doped-crystal (151Eu3+:Y2SiO5) atomic-frequency-comb "
+                "quantum memory: storage of a photonic time-bin qubit for 20ms "
+                "with average output fidelity 85(2)% (readout_error_rate=0.15 "
+                "represents this retrieval infidelity, not a logic-gate error "
+                "-- this platform is a passive memory with no active "
+                "entangling gate reported here, so gate_error_rate is left at "
+                "an unsourced nominal placeholder).",
+    source="Ortu, Holzapfel, Etesse & Afzelius, \"Storage of photonic "
+           "time-bin qubits for up to 20 ms in a rare-earth doped crystal\", "
+           "npj Quantum Information 8, 29 (2022)",
+    source_url_or_doi="https://doi.org/10.1038/s41534-022-00541-3")
 
 
 ALL_PROFILES = [IDEAL_PROFILE, SUPERCONDUCTING_PROFILE, ION_TRAP_PROFILE,

@@ -1,0 +1,4 @@
+eval_topology,n_requests,linear_zero_shot_served_ratio,linear_zero_shot_utility,tabular_in_distribution_served_ratio,tabular_in_distribution_utility,streaming_annealer_served_ratio,streaming_annealer_utility
+ring_8,16,0.5625,261.0050687600892,0.3125,100.2938006438564,0.625,312.1635163881543
+erdos_renyi_8,15,1.0,670.801763224441,1.0,666.4931947595501,1.0,670.801763224441
+barabasi_albert_8,20,0.55,334.9648309067252,0.5,282.59305136563916,0.6,384.3415810960926

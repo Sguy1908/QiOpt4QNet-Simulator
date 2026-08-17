@@ -125,6 +125,86 @@ def run_bond_dim_sweep():
     print(f"Wrote {len(all_rows)} rows to {path}")
 
 
+def run_adaptive_bond_dim_sweep():
+    """Future work: adaptive bond dimension driven by truncation error.
+
+    Sweeps the truncation-error target trunc_eps at a generous max_bond_dim
+    cap and reports the bond dimension the solver actually uses (chi_used)
+    versus a fixed-chi baseline at the same request counts."""
+    all_rows = []
+    topo_fn = lambda: generate_chain_topology(n_nodes=8, edge_capacity=6)
+    instances = contention_sweep_instances(topo_fn, [8, 16, 24], seed=42)
+
+    for name, inst in instances.items():
+        n_req = inst["n_requests"]
+        b, ec, mc = inst["bundles"], inst["edge_capacities"], inst["memory_capacities"]
+
+        for eps in [1e-1, 1e-2, 1e-3, 1e-4, 1e-6, 1e-8]:
+            tn_sf = build_tensor_network(b, ec, mc)
+            t0 = time.perf_counter()
+            r = tn_sf(adaptive_bond_dim=True, trunc_eps=eps, max_bond_dim=64,
+                     max_sweeps=2, beta=5.0)
+            tt = time.perf_counter() - t0
+            all_rows.append({
+                "topology": "chain_8",
+                "n_requests": n_req,
+                "trunc_eps": eps,
+                "max_chi_used": r["max_chi_used"],
+                "served": len(r.get("selected", [])),
+                "served_ratio": len(r.get("selected", [])) / max(n_req, 1),
+                "utility": sum(_u(b, rid, bid) for rid, bid in r.get("selected", [])),
+                "time_s": tt,
+            })
+
+    path = os.path.join(OUT, "adaptive_bond_dim_sweep.csv")
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=all_rows[0].keys())
+        w.writeheader()
+        w.writerows(all_rows)
+    print(f"Wrote {len(all_rows)} rows to {path}")
+
+
+def run_mps_ordering_experiments():
+    """Future work: learned (spectral) MPS coupling order.
+
+    Compares the existing greedy nearest-neighbor coupling order against a
+    Fiedler-vector spectral ordering (a training-free, structural stand-in
+    for a "learned" order) on solution quality and wall time."""
+    from optimization.tensor_network_optimizer import TensorNetworkOptimizer
+
+    all_rows = []
+    for label, topo_fn in [
+        ("chain_10", lambda: generate_chain_topology(n_nodes=10, edge_capacity=6)),
+        ("grid_6x6", lambda: generate_grid_topology(rows=6, cols=6, edge_capacity=5)),
+    ]:
+        instances = contention_sweep_instances(topo_fn, [12, 16], seed=42)
+        for name, inst in instances.items():
+            n_req = inst["n_requests"]
+            b, ec, mc = inst["bundles"], inst["edge_capacities"], inst["memory_capacities"]
+            for strategy in ["greedy", "spectral"]:
+                opt = TensorNetworkOptimizer(b, ec, mc, order_strategy=strategy)
+                t0 = time.perf_counter()
+                r = opt.solve(bond_dim=4, max_sweeps=2, beta=5.0)
+                tt = time.perf_counter() - t0
+                all_rows.append({
+                    "topology": label,
+                    "n_requests": n_req,
+                    "order_strategy": strategy,
+                    "served": len(r.get("selected", [])),
+                    "served_ratio": len(r.get("selected", [])) / max(n_req, 1),
+                    "utility": sum(_u(b, rid, bid) for rid, bid in r.get("selected", [])),
+                    "energy": r["energy"],
+                    "time_s": tt,
+                })
+
+    path = os.path.join(OUT, "mps_ordering_comparison.csv")
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=all_rows[0].keys())
+        w.writeheader()
+        w.writerows(all_rows)
+    print(f"Wrote {len(all_rows)} rows to {path}")
+
+
 def run_grid_comparison():
     """Compare solvers on grid topology."""
     all_rows = []
@@ -725,6 +805,46 @@ def run_disjoint_paths_experiments():
     _write_rows(rows, "disjoint_paths_comparison.csv")
 
 
+def run_qlearning_experiments():
+    """Wave 3 (item iii): tabular Q-learning router vs streaming annealer.
+
+    Was previously only produced by qlearning_router.py's own __main__
+    block despite fig_qlearning() depending on its CSV; wired in here so
+    it runs as part of the standard sweep."""
+    from baselines.qlearning_router import run_rl_comparison
+
+    topo_fn = lambda: generate_chain_topology(n_nodes=6, edge_capacity=6,
+                                              memory_capacity=10, latency=5.0)
+    run_rl_comparison(topo_fn, n_slots=10, mean_rate=1.0, episodes=10,
+                      seed=42, out_dir=OUT)
+
+
+def run_rl_generalization_experiments():
+    """Future work: function-approximation RL that generalizes across
+    topologies. Trains one LinearQRouter on a chain topology, then
+    zero-shot evaluates the frozen weights on ring/grid/scale-free
+    topologies it never trained on, against an in-distribution tabular
+    control and the streaming annealer baseline."""
+    from baselines.qlearning_router import run_topology_generalization_study
+    from extensions.topologies import (
+        generate_ring_topology, generate_erdos_renyi_topology,
+        generate_barabasi_albert_topology,
+    )
+
+    train_fn = lambda: generate_chain_topology(n_nodes=8, edge_capacity=6, memory_capacity=10)
+    eval_fns = {
+        "ring_8": lambda: generate_ring_topology(n_nodes=8, edge_capacity=6, memory_capacity=10),
+        "erdos_renyi_8": lambda: generate_erdos_renyi_topology(n_nodes=8, p=0.4,
+                                                               edge_capacity=6, memory_capacity=10, seed=1),
+        "barabasi_albert_8": lambda: generate_barabasi_albert_topology(n_nodes=8, m_links=2,
+                                                                       edge_capacity=6, memory_capacity=10, seed=1),
+    }
+    res = run_topology_generalization_study(
+        train_topology_fns=[train_fn], eval_topology_fns=eval_fns,
+        n_slots=15, mean_rate=1.2, episodes=40, seed=42)
+    _write_rows(res["rows"], "rl_topology_generalization.csv")
+
+
 def run_swapping_order_experiments():
     """Extension 17 (E17): swapping-strategy order effects."""
     from extensions.swapping_order import (
@@ -922,6 +1042,39 @@ def run_quantum_annealing_experiments():
     _write_rows(res["rows"], "quantum_annealing_sweep.csv")
 
 
+def run_hardware_literature_validation_experiments():
+    """Future work: literature-calibrated hardware validation.
+
+    NOT a physical hardware experiment -- re-parametrizes HardwareProfile
+    from real, cited, published measured T1/T2/gate/readout numbers and
+    checks the simulated fidelity-decay trend ranks consistently with the
+    cited sources' T2 ordering."""
+    from hardware.literature_validation import run_literature_calibration_report
+
+    topo_fn = lambda: generate_chain_topology(n_nodes=6, edge_capacity=6,
+                                              memory_capacity=10, latency=5.0)
+    res = run_literature_calibration_report(topo_fn, n_slots=15, mean_rate=1.0, seed=7)
+    _write_rows(res["rows"], "hardware_literature_validation.csv")
+
+
+def run_quantum_annealing_topology_experiments():
+    """Pegasus/Zephyr hardware-lattice support.
+
+    Extends the Chimera-only QA backend comparison with two more hardware
+    lattices (Pegasus-like, Zephyr-like, both via dwave.graphs), reporting
+    qubit count, chain-break fraction and utility per topology per problem
+    size."""
+    from optimization.quantum_annealing_backend import run_quantum_annealing_topology_sweep
+
+    topo_fn = lambda: generate_chain_topology(n_nodes=8, edge_capacity=6,
+                                              memory_capacity=10)
+    res = run_quantum_annealing_topology_sweep(
+        topo_fn, n_requests_list=[4, 6, 8],
+        topologies=("chimera", "pegasus", "zephyr"),
+        num_reads=20, num_sweeps=200, k=8, seed=42)
+    _write_rows(res["rows"], "quantum_annealing_topology_sweep.csv")
+
+
 def run_chance_constrained_experiments():
     """Wave 3: SLA-calibration frontier of chance-constrained routing.
 
@@ -1015,6 +1168,24 @@ if __name__ == "__main__":
 
     print("\n22. Chance-constrained routing (Wave 3): SLA-calibration frontier...")
     run_chance_constrained_experiments()
+
+    print("\n23. Quantum annealing topologies : Chimera vs Pegasus vs Zephyr...")
+    run_quantum_annealing_topology_experiments()
+
+    print("\n24. Hardware literature validation: re-calibrated profiles vs cited sources...")
+    run_hardware_literature_validation_experiments()
+
+    print("\n25. Adaptive bond dimension: truncation-error-driven chi...")
+    run_adaptive_bond_dim_sweep()
+
+    print("\n26. MPS ordering: greedy vs spectral coupling order...")
+    run_mps_ordering_experiments()
+
+    print("\n27. Q-learning router (Wave 3, item iii): tabular vs streaming annealer...")
+    run_qlearning_experiments()
+
+    print("\n28. RL topology generalization (future work): zero-shot transfer...")
+    run_rl_generalization_experiments()
 
     print(f"\nAll results in {OUT}/")
 

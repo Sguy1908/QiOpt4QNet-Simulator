@@ -24,6 +24,7 @@ per-node occupation intervals a router must reserve.
 
 from dataclasses import dataclass, field
 import math
+import random
 from typing import Dict, List, Optional, Tuple
 
 
@@ -157,18 +158,100 @@ class MemoryScheduler:
                 return False
         return True
 
-    def reserve(self, node: str, amount: int, start: float, end: float) -> Optional[str]:
+    def reserve(self, node: str, amount: int, start: float, end: float,
+               std: float = 0.0) -> Optional[str]:
         """Reserve ``amount`` slots on ``node`` for ``[start, end)``.  Returns a
-        reservation id, or ``None`` if infeasible at any instant."""
+        reservation id, or ``None`` if infeasible at any instant.
+
+        ``std`` (default 0.0, fully backward compatible) optionally records
+        this reservation's completion-time uncertainty, used only by
+        ``can_reserve_prob``'s ``stochastic_others=True`` mode -- the
+        deterministic ``can_reserve``/``reserve`` path never reads it."""
         if not self.can_reserve(node, amount, start, end):
             return None
         rid = f"mem_{self._next_id}"
         self._next_id += 1
         self._reservations[node].append({
             "id": rid, "node": node, "amount": amount,
-            "start": start, "end": end,
+            "start": start, "end": end, "std": std,
         })
         return rid
+
+    def _fits_against(self, reservations: List[Dict], cap: int, amount: int,
+                      start: float, end: float) -> bool:
+        if amount <= 0 or end <= start:
+            return True
+        check_times = {start}
+        for r in reservations:
+            if start < r["start"] < end:
+                check_times.add(r["start"])
+        for t in check_times:
+            occ = sum(r["amount"] for r in reservations if r["start"] <= t < r["end"])
+            if occ + amount > cap:
+                return False
+        return True
+
+    def estimate_fit_probability(self, node: str, amount: int, start_mean: float,
+                                 end_mean: float, start_std: float = 0.0,
+                                 end_std: float = 0.0, n_samples: int = 200,
+                                 rng: Optional[random.Random] = None,
+                                 stochastic_others: bool = False) -> float:
+        """Monte-Carlo estimate of P(the window fits at every instant),
+        i.e. the fraction of resampled draws that pass ``can_reserve``.
+
+        The candidate reservation's own ``[start, end)`` window is resampled
+        from independent normals ``N(start_mean, start_std)`` /
+        ``N(end_mean, end_std)`` each draw. ``stochastic_others=False``
+        (default) checks each draw against the already-committed
+        reservations at their *nominal* (mean) times -- cheaper, and
+        mirrors the scheduler's existing sequential/online commitment
+        style, where only the request being admitted right now is
+        uncertain. ``stochastic_others=True`` additionally resamples every
+        currently-committed reservation that carries a nonzero ``std`` (a
+        fully joint chance constraint; more expensive since it resamples
+        the whole node's reservation list on every draw)."""
+        cap = self.capacities.get(node, 0)
+        rng = rng or random.Random()
+        successes = 0
+        for _ in range(n_samples):
+            s = rng.gauss(start_mean, start_std) if start_std > 0 else start_mean
+            e = rng.gauss(end_mean, end_std) if end_std > 0 else end_mean
+            if e < s:
+                e = s
+            if stochastic_others:
+                sampled = []
+                for r in self._reservations.get(node, []):
+                    std = r.get("std", 0.0)
+                    r_start = rng.gauss(r["start"], std) if std > 0 else r["start"]
+                    duration = r["end"] - r["start"]
+                    sampled.append({"start": r_start, "end": r_start + duration,
+                                    "amount": r["amount"]})
+                fits = self._fits_against(sampled, cap, amount, s, e)
+            else:
+                fits = self.can_reserve(node, amount, s, e)
+            if fits:
+                successes += 1
+        return successes / n_samples
+
+    def can_reserve_prob(self, node: str, amount: int, start_mean: float,
+                         end_mean: float, start_std: float = 0.0,
+                         end_std: float = 0.0, eps: float = 0.0,
+                         n_samples: int = 200,
+                         rng: Optional[random.Random] = None,
+                         stochastic_others: bool = False) -> bool:
+        """True iff ``estimate_fit_probability(...) >= 1 - eps``. When
+        ``start_std == end_std == 0`` (and ``stochastic_others`` isn't
+        asking for extra randomness) this reduces exactly to the
+        deterministic ``can_reserve`` -- the ``std=0`` degenerate case."""
+        has_other_uncertainty = stochastic_others and any(
+            r.get("std", 0.0) > 0 for r in self._reservations.get(node, []))
+        if start_std <= 0.0 and end_std <= 0.0 and not has_other_uncertainty:
+            return self.can_reserve(node, amount, start_mean, end_mean)
+        prob = self.estimate_fit_probability(
+            node, amount, start_mean, end_mean, start_std=start_std,
+            end_std=end_std, n_samples=n_samples, rng=rng,
+            stochastic_others=stochastic_others)
+        return prob >= (1.0 - eps)
 
     def release(self, reservation_id: str):
         for node, reservations in self._reservations.items():

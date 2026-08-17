@@ -6,7 +6,10 @@ connected by strong ferromagnetic couplings, the embedded problem is annealed,
 and the chains are collapsed back to logical bits by majority vote.  This
 module emulates that stack in full:
 
-    1. ``build_hardware_graph`` -- a Chimera-like lattice (k_{t,t} unit cells);
+    1. ``build_hardware_graph`` -- a Chimera-like lattice (k_{t,t} unit cells),
+       or ``build_hardware_graph_pegasus``/``build_hardware_graph_zephyr`` for
+       D-Wave's newer Pegasus- and Zephyr-like lattices (selected via the
+       ``topology`` argument of ``quantum_anneal_solve``);
     2. ``minor_embed`` -- greedy ``minorminer`` embedding of the logical QUBO;
     3. ``embed_bqm`` -- tile/chain construction of the embedded QUBO;
     4. ``default_chain_strength`` = max|h| + 2 max|J| (DWave's rule of thumb);
@@ -31,6 +34,15 @@ try:
     import minorminer  # greedy minor-embedding solver
 except ImportError:  # pragma: no cover
     minorminer = None
+
+try:
+    # dwave-graphs ships as a transitive dependency of minorminer and
+    # supersedes the now-deprecated dwave-networkx package (Ocean 10+), so we
+    # depend on it directly rather than the deprecated one for the Pegasus
+    # and Zephyr hardware-lattice generators.
+    import dwave.graphs as _dwave_graphs
+except ImportError:  # pragma: no cover
+    _dwave_graphs = None
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +92,57 @@ def _fit_hardware(n_qubits: int, t: int = 4) -> Tuple[int, int]:
             if rows * cols * 2 * t >= n_qubits:
                 return rows, cols
     return 16, 16
+
+
+def _require_dwave_graphs():
+    if _dwave_graphs is None:  # pragma: no cover
+        raise ImportError(
+            "Pegasus/Zephyr hardware graphs require the 'dwave-graphs' "
+            "package (already a transitive dependency of minorminer; "
+            "install directly with `pip install dwave-graphs` if missing).")
+
+
+def build_hardware_graph_pegasus(m: int) -> Dict:
+    """Pegasus-like hardware lattice P_m (D-Wave's second-generation
+    topology), via ``dwave.graphs.pegasus_graph``, converted to the same
+    ``{node: set(neighbors)}`` adjacency-dict format ``build_hardware_graph``
+    uses for the Chimera-like lattice. ``m >= 2`` (``m=1`` is the empty
+    graph)."""
+    _require_dwave_graphs()
+    g = _dwave_graphs.pegasus_graph(m)
+    return {n: set(g.neighbors(n)) for n in g.nodes}
+
+
+def build_hardware_graph_zephyr(m: int) -> Dict:
+    """Zephyr-like hardware lattice Z_m (D-Wave's third-generation
+    topology), via ``dwave.graphs.zephyr_graph``."""
+    _require_dwave_graphs()
+    g = _dwave_graphs.zephyr_graph(m)
+    return {n: set(g.neighbors(n)) for n in g.nodes}
+
+
+def hardware_qubits_pegasus(m: int) -> int:
+    return len(build_hardware_graph_pegasus(m)) if m >= 2 else 0
+
+
+def hardware_qubits_zephyr(m: int) -> int:
+    return len(build_hardware_graph_zephyr(m)) if m >= 1 else 0
+
+
+def _fit_hardware_pegasus(n_qubits: int, m_max: int = 12) -> int:
+    """Smallest Pegasus size ``m`` (``m>=2``) with >= ``n_qubits`` qubits."""
+    for m in range(2, m_max + 1):
+        if hardware_qubits_pegasus(m) >= n_qubits:
+            return m
+    return m_max
+
+
+def _fit_hardware_zephyr(n_qubits: int, m_max: int = 12) -> int:
+    """Smallest Zephyr size ``m`` (``m>=1``) with >= ``n_qubits`` qubits."""
+    for m in range(1, m_max + 1):
+        if hardware_qubits_zephyr(m) >= n_qubits:
+            return m
+    return m_max
 
 
 # ---------------------------------------------------------------------------
@@ -177,9 +240,18 @@ def quantum_anneal_solve(bundles: List[dict], edge_capacities: dict,
                          num_reads: int = 50, num_sweeps: int = 400,
                          beta_range: Tuple[float, float] = (1e-4, 10.0),
                          chain_strength: Optional[float] = None,
+                         topology: str = "chimera",
                          rows: int = 0, cols: int = 0, t: int = 8,
+                         pegasus_m: int = 0, zephyr_m: int = 0,
                          seed: int = 42) -> Dict:
-    """Solve the k-reduced QUBO with the emulated quantum-annealing backend."""
+    """Solve the k-reduced QUBO with the emulated quantum-annealing backend.
+
+    ``topology`` selects the hardware lattice the QUBO is minor-embedded
+    onto: ``"chimera"`` (default, hand-rolled K_{t,t} lattice), ``"pegasus"``
+    or ``"zephyr"`` (via ``dwave.graphs``). The rest of the pipeline --
+    embedding, chain-strength, sampling, unembedding -- is topology-agnostic
+    and unchanged.
+    """
     from optimization.adaptive_qubo import AdaptiveCandidateSelector
     from optimization.qubo_optimizer import QUBOOptimizer
 
@@ -194,9 +266,28 @@ def quantum_anneal_solve(bundles: List[dict], edge_capacities: dict,
         chain_strength = default_chain_strength(bqm)
 
     n_hw = bqm.num_variables * 16
-    if rows == 0 or cols == 0 or rows * cols * 2 * t < n_hw:
-        rows, cols = _fit_hardware(n_hw, t=t)
-    hardware = build_hardware_graph(rows, cols, t=t)
+    lattice_size: Optional[int] = None
+    if topology == "chimera":
+        if rows == 0 or cols == 0 or rows * cols * 2 * t < n_hw:
+            rows, cols = _fit_hardware(n_hw, t=t)
+        hardware = build_hardware_graph(rows, cols, t=t)
+        n_qubits_total = rows * cols * 2 * t
+    elif topology == "pegasus":
+        if pegasus_m == 0 or hardware_qubits_pegasus(pegasus_m) < n_hw:
+            pegasus_m = _fit_hardware_pegasus(n_hw)
+        hardware = build_hardware_graph_pegasus(pegasus_m)
+        n_qubits_total = hardware_qubits_pegasus(pegasus_m)
+        lattice_size = pegasus_m
+    elif topology == "zephyr":
+        if zephyr_m == 0 or hardware_qubits_zephyr(zephyr_m) < n_hw:
+            zephyr_m = _fit_hardware_zephyr(n_hw)
+        hardware = build_hardware_graph_zephyr(zephyr_m)
+        n_qubits_total = hardware_qubits_zephyr(zephyr_m)
+        lattice_size = zephyr_m
+    else:
+        raise ValueError(
+            f"unknown topology {topology!r}; expected 'chimera', 'pegasus', "
+            "or 'zephyr'")
 
     logical_adj = {v: set() for v in bqm.variables}
     for u, v in bqm.quadratic:
@@ -207,13 +298,17 @@ def quantum_anneal_solve(bundles: List[dict], edge_capacities: dict,
 
     t0 = time.perf_counter()
     if not embedding:
-        return {"k": k, "utility": 0.0, "served": 0,
+        result = {"k": k, "utility": 0.0, "served": 0,
                 "n_qubo_variables": bqm.num_variables,
-                "n_qubits": rows * cols * 2 * t,
+                "n_qubits": n_qubits_total,
+                "topology": topology,
                 "chain_strength": chain_strength,
                 "chain_break_fraction": 1.0,
                 "embedded": False, "wall_time_s": time.perf_counter() - t0,
                 "selected": []}
+        if lattice_size is not None:
+            result["lattice_size"] = lattice_size
+        return result
 
     embedded = embed_bqm(bqm, embedding, chain_strength)
 
@@ -241,12 +336,13 @@ def quantum_anneal_solve(bundles: List[dict], edge_capacities: dict,
     total_chains = len(embedding) * len(response)
     elapsed = time.perf_counter() - t0
 
-    return {
+    result = {
         "k": k,
         "n_bundles_in": len(bundles),
         "n_bundles_in_qubo": len(reduced),
         "n_qubo_variables": bqm.num_variables,
-        "n_qubits": rows * cols * 2 * t,
+        "n_qubits": n_qubits_total,
+        "topology": topology,
         "n_chain_qubits": max(len(c) for c in embedding.values()),
         "chain_strength": chain_strength,
         "chain_break_fraction": n_broken / max(total_chains, 1),
@@ -256,6 +352,9 @@ def quantum_anneal_solve(bundles: List[dict], edge_capacities: dict,
         "wall_time_s": elapsed,
         "selected": best_sel,
     }
+    if lattice_size is not None:
+        result["lattice_size"] = lattice_size
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -351,4 +450,44 @@ def run_quantum_annealing_sweep(topology_fn: Callable,
             "sqa_utility": sum(util.get(s, 0.0) for s in sqa_sel),
             "sqa_wall_time_s": sqa_t,
         })
+    return {"rows": rows}
+
+
+def run_quantum_annealing_topology_sweep(topology_fn: Callable,
+                                         n_requests_list: Optional[List[int]] = None,
+                                         topologies: Tuple[str, ...] = ("chimera", "pegasus", "zephyr"),
+                                         num_reads: int = 40, num_sweeps: int = 400,
+                                         k: int = 8, seed: int = 42) -> Dict:
+    """Compares the embedded quantum-annealing backend across hardware
+    lattices (Chimera-like / Pegasus-like / Zephyr-like): qubit count,
+    chain-break fraction and utility per topology per problem size. Extends
+    ``run_quantum_annealing_sweep``'s Chimera-only comparison with two more
+    hardware-lattice rows."""
+    from experiments.instances import contention_sweep_instances
+
+    if n_requests_list is None:
+        n_requests_list = [6, 10, 14]
+
+    insts = contention_sweep_instances(topology_fn, n_requests_list, seed=seed)
+    rows = []
+    for n_req in n_requests_list:
+        inst = insts[f"req{n_req}"]
+        bundles, ec, mc = (inst["bundles"], inst["edge_capacities"],
+                           inst["memory_capacities"])
+        for topo in topologies:
+            qa = quantum_anneal_solve(bundles, ec, mc, k=k, num_reads=num_reads,
+                                      num_sweeps=num_sweeps, topology=topo,
+                                      seed=seed)
+            rows.append({
+                "n_requests": n_req,
+                "topology": topo,
+                "n_qubo_variables": qa["n_qubo_variables"],
+                "n_qubits": qa["n_qubits"],
+                "lattice_size": qa.get("lattice_size"),
+                "utility": qa["utility"],
+                "served": qa["served"],
+                "chain_break_fraction": qa["chain_break_fraction"],
+                "embedded": qa["embedded"],
+                "wall_time_s": qa["wall_time_s"],
+            })
     return {"rows": rows}

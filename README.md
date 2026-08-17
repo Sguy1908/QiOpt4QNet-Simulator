@@ -1,12 +1,6 @@
 # QiOpt4QNet-Simulator
 
-A quantum-network simulation and optimization framework. It models quantum
-repeater networks (nodes with limited quantum memory, lossy/noisy links,
-entanglement generation and swapping), builds candidate route +
-purification "bundles" for service requests, and compares multiple ways of
-deciding which bundles to admit under capacity constraints — from exact
-MILP solving and quantum/QUBO annealing to classical heuristics and a
-learned ranking model.
+A quantum-network simulation and optimization framework. It models quantum repeater networks (nodes with limited quantum memory, lossy/noisy links, entanglement generation and swapping), builds candidate route + purification "bundles" for service requests, and compares multiple ways of deciding which bundles to admit under capacity constraints, from exact MILP solving and quantum/QUBO annealing to classical heuristics and a learned ranking model.
 
 ## What's in here
 
@@ -229,6 +223,7 @@ bundle interface:
 | `optimization/adaptive_budget.py` | Congestion/density-driven adaptive QUBO candidate budget vs fixed top-k and full-candidate baselines |
 | `optimization/quantum_annealing_backend.py` | Quantum-annealing backend: minor-embedding onto a hardware lattice, PIA sampler with chain-break-aware decode, compared against SA/SQA |
 | `optimization/chance_constrained.py` | Chance-constrained routing: replaces the hard rule `F ≥ F_min` with the quantile constraint `P(F_r ≥ F_min) ≥ 1-ε` under truncated-normal fidelity noise; hard, chance(ε), and nominal policies solved by exact ILP and executed in the DES engine to certify that the empirical SLA stays ≤ ε |
+| `optimization/conflict_purification_scheduler.py` | Network-level, conflict-aware purification scheduling (PSC-style): fixed Dijkstra routing, then a per-link conflict metric (aggregated purification need across concurrent requests, scaled by remaining Bell-pair scarcity) drives probabilistic purification decisions shared across every request using a link -- vs `threshold`/`greedy` baselines that decide per-request with no cross-request coordination |
 
 **Run the full experiment battery** (writes ~42 CSVs to `results/experiments/`):
 
@@ -249,7 +244,7 @@ by unit tests under `tests/` (`test_extensions_*.py`, `test_joint_scheduling.py`
 `test_discrete_event_simulation.py`, `test_recourse.py`,
 `test_purification_scheduler.py`, `test_optimality_benchmark.py`,
 `test_adaptive_budget.py`, `test_quantum_annealing_backend.py`,
-`test_chance_constrained.py`).
+`test_chance_constrained.py`, `test_conflict_purification_scheduler.py`).
 
 ## Physics notes
 

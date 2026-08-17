@@ -144,6 +144,99 @@ def fig_bond_dimension_scaling():
     print(f"Saved {path}")
 
 
+def fig_adaptive_bond_dimension():
+    """Future work: adaptive bond dimension driven by truncation error."""
+    if not HAS_MPL:
+        return
+    rows = _load(os.path.join(DATA, "adaptive_bond_dim_sweep.csv"))
+    ns = sorted(set(int(r["n_requests"]) for r in rows))
+    eps_vals = sorted(set(float(r["trunc_eps"]) for r in rows), reverse=True)
+    colors = plt.cm.viridis(np.linspace(0.15, 0.9, len(ns)))
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
+    for i, n in enumerate(ns):
+        subset = sorted([r for r in rows if int(r["n_requests"]) == n],
+                        key=lambda r: -float(r["trunc_eps"]))
+        xs = [float(r["trunc_eps"]) for r in subset]
+        ys = [float(r["max_chi_used"]) for r in subset]
+        ax1.plot(xs, ys, marker="o", color=colors[i], label=f"N={n}")
+    ax1.set_xscale("log")
+    ax1.invert_xaxis()
+    ax1.set_xlabel("Truncation-error target (trunc_eps)")
+    ax1.set_ylabel("Bond dimension used (max chi)")
+    ax1.set_title("Adaptive bond dimension vs truncation-error target")
+    ax1.legend(fontsize=8)
+    ax1.grid(True, alpha=0.3)
+
+    for i, n in enumerate(ns):
+        subset = sorted([r for r in rows if int(r["n_requests"]) == n],
+                        key=lambda r: -float(r["trunc_eps"]))
+        xs = [float(r["trunc_eps"]) for r in subset]
+        ys = [float(r["served_ratio"]) for r in subset]
+        ax2.plot(xs, ys, marker="s", color=colors[i], label=f"N={n}")
+    ax2.set_xscale("log")
+    ax2.invert_xaxis()
+    ax2.set_xlabel("Truncation-error target (trunc_eps)")
+    ax2.set_ylabel("Served ratio")
+    ax2.set_ylim(0, 1.05)
+    ax2.set_title("Solution quality vs truncation-error target")
+    ax2.legend(fontsize=8)
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    path = os.path.join(OUT, "adaptive_bond_dimension.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved {path}")
+
+
+def fig_mps_ordering():
+    """Future work: learned (spectral) MPS coupling order vs greedy."""
+    if not HAS_MPL:
+        return
+    rows = _load(os.path.join(DATA, "mps_ordering_comparison.csv"))
+    topologies = sorted(set(r["topology"] for r in rows))
+    strategies = ["greedy", "spectral"]
+    colors = {"greedy": "#4c72b0", "spectral": "#c44e52"}
+    x = range(len(topologies))
+    width = 0.35
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
+    for i, strat in enumerate(strategies):
+        util = []
+        for topo in topologies:
+            subset = [r for r in rows if r["topology"] == topo and r["order_strategy"] == strat]
+            util.append(sum(float(r["utility"]) for r in subset) / max(len(subset), 1))
+        ax1.bar([xi + (i - 0.5) * width for xi in x], util, width,
+               label=strat, color=colors[strat], alpha=0.85)
+    ax1.set_xticks(list(x))
+    ax1.set_xticklabels(topologies)
+    ax1.set_ylabel("Mean utility")
+    ax1.set_title("MPS coupling order: greedy vs spectral (not a trained model)")
+    ax1.legend(fontsize=8)
+    ax1.grid(True, alpha=0.3, axis="y")
+
+    for i, strat in enumerate(strategies):
+        t = []
+        for topo in topologies:
+            subset = [r for r in rows if r["topology"] == topo and r["order_strategy"] == strat]
+            t.append(sum(float(r["time_s"]) for r in subset) / max(len(subset), 1))
+        ax2.bar([xi + (i - 0.5) * width for xi in x], t, width,
+               label=strat, color=colors[strat], alpha=0.85)
+    ax2.set_xticks(list(x))
+    ax2.set_xticklabels(topologies)
+    ax2.set_ylabel("Mean wall-clock time (s)")
+    ax2.set_title("Runtime: greedy vs spectral ordering")
+    ax2.legend(fontsize=8)
+    ax2.grid(True, alpha=0.3, axis="y")
+
+    plt.tight_layout()
+    path = os.path.join(OUT, "mps_ordering.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved {path}")
+
+
 def fig_topology_comparison():
     if not HAS_MPL:
         return
@@ -515,6 +608,41 @@ def fig_qlearning():
     ax1.legend(lines1 + lines2, labels1 + labels2, fontsize=8, loc="center right")
     plt.tight_layout()
     path = os.path.join(OUT, "qlearning.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved {path}")
+
+
+def fig_rl_generalization():
+    """Future work: function-approximation RL that generalizes across
+    topologies. Zero-shot linear-router served ratio vs an in-distribution
+    tabular control and the streaming-annealer baseline, per eval topology
+    the linear router never trained on."""
+    if not HAS_MPL:
+        return
+    rows = _load(os.path.join(DATA, "rl_topology_generalization.csv"))
+    topos = [r["eval_topology"] for r in rows]
+    x = range(len(topos))
+    width = 0.25
+    series = [
+        ("Linear (zero-shot)", "linear_zero_shot_served_ratio", "#c44e52"),
+        ("Tabular (in-distribution)", "tabular_in_distribution_served_ratio", "#4c72b0"),
+        ("Streaming annealer", "streaming_annealer_served_ratio", "#55a868"),
+    ]
+    fig, ax = plt.subplots(figsize=(9, 4.6))
+    for i, (label, key, color) in enumerate(series):
+        vals = [float(r[key]) for r in rows]
+        ax.bar([xi + (i - 1) * width for xi in x], vals, width, label=label,
+              color=color, alpha=0.85)
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(topos)
+    ax.set_ylabel("Served ratio")
+    ax.set_ylim(0, 1.05)
+    ax.set_title("RL generalization: zero-shot transfer to unseen topologies")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3, axis="y")
+    plt.tight_layout()
+    path = os.path.join(OUT, "rl_topology_generalization.png")
     plt.savefig(path, dpi=150)
     plt.close()
     print(f"Saved {path}")
@@ -1309,6 +1437,92 @@ def fig_quantum_annealing():
     print(f"Saved {path}")
 
 
+def fig_quantum_annealing_topologies():
+    """Chimera vs Pegasus vs Zephyr hardware-lattice comparison."""
+    if not HAS_MPL:
+        return
+    rows = _load(os.path.join(DATA, "quantum_annealing_topology_sweep.csv"))
+    ns = sorted(set(int(r["n_requests"]) for r in rows))
+    topologies = ["chimera", "pegasus", "zephyr"]
+    colors = {"chimera": "#4c72b0", "pegasus": "#c44e52", "zephyr": "#55a868"}
+    x = range(len(ns))
+    width = 0.25
+
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 4.6))
+    for i, topo in enumerate(topologies):
+        util = [float([r for r in rows if int(r["n_requests"]) == n
+                       and r["topology"] == topo][0]["utility"]) for n in ns]
+        ax1.bar([xi + (i - 1) * width for xi in x], util, width,
+                label=topo, color=colors[topo], alpha=0.85)
+    ax1.set_xticks(list(x))
+    ax1.set_xticklabels([f"N={n}" for n in ns])
+    ax1.set_ylabel("Utility")
+    ax1.set_title("Embedded QA utility by hardware lattice")
+    ax1.legend(fontsize=7)
+    ax1.grid(True, alpha=0.3, axis="y")
+
+    for i, topo in enumerate(topologies):
+        qubits = [float([r for r in rows if int(r["n_requests"]) == n
+                         and r["topology"] == topo][0]["n_qubits"]) for n in ns]
+        ax2.bar([xi + (i - 1) * width for xi in x], qubits, width,
+                label=topo, color=colors[topo], alpha=0.85)
+    ax2.set_xticks(list(x))
+    ax2.set_xticklabels([f"N={n}" for n in ns])
+    ax2.set_ylabel("Hardware qubits (minor-embedded)")
+    ax2.set_title("Embedding resource use by lattice")
+    ax2.legend(fontsize=7)
+    ax2.grid(True, alpha=0.3, axis="y")
+
+    for i, topo in enumerate(topologies):
+        cb = [float([r for r in rows if int(r["n_requests"]) == n
+                     and r["topology"] == topo][0]["chain_break_fraction"]) for n in ns]
+        ax3.bar([xi + (i - 1) * width for xi in x], cb, width,
+                label=topo, color=colors[topo], alpha=0.85)
+    ax3.set_xticks(list(x))
+    ax3.set_xticklabels([f"N={n}" for n in ns])
+    ax3.set_ylabel("Chain-break fraction")
+    ax3.set_title("Chain breaks by lattice")
+    ax3.legend(fontsize=7)
+    ax3.grid(True, alpha=0.3, axis="y")
+
+    plt.tight_layout()
+    path = os.path.join(OUT, "quantum_annealing_topologies.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved {path}")
+
+
+def fig_hardware_literature_validation():
+    """Future work: literature-calibrated hardware validation.
+
+    NOT a physical hardware experiment -- delivered fidelity under
+    HardwareProfile constants re-calibrated from cited, published measured
+    parameters (see hardware/profiles.py)."""
+    if not HAS_MPL:
+        return
+    rows = _load(os.path.join(DATA, "hardware_literature_validation.csv"))
+    rows = sorted(rows, key=lambda r: float(r["t2_us"]))
+    names = [r["profile"] for r in rows]
+    fid = [float(r["mean_delivered_fidelity"]) for r in rows]
+    labels = [f"{r['profile']}\n({r['source'][:28]}...)" if r["source"] else r["profile"]
+             for r in rows]
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    colors = ["#8c8c8c" if r["profile"] == "ideal" else "#4c72b0" for r in rows]
+    ax.bar(range(len(rows)), fid, color=colors, alpha=0.85)
+    ax.set_xticks(range(len(rows)))
+    ax.set_xticklabels(labels, fontsize=7, rotation=15, ha="right")
+    ax.set_ylabel("Mean delivered fidelity")
+    ax.set_title("Hardware profiles, literature-calibrated (NOT a physical "
+                 "hardware experiment) -- ordered by cited T2")
+    ax.grid(True, alpha=0.3, axis="y")
+    plt.tight_layout()
+    path = os.path.join(OUT, "hardware_literature_validation.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved {path}")
+
+
 def fig_chance_constrained():
     if not HAS_MPL:
         return
@@ -1390,6 +1604,11 @@ if __name__ == "__main__":
     fig_adaptive_budget()
     fig_quantum_annealing()
     fig_chance_constrained()
+    fig_quantum_annealing_topologies()
+    fig_hardware_literature_validation()
+    fig_adaptive_bond_dimension()
+    fig_mps_ordering()
+    fig_rl_generalization()
     print("\nGenerating tables...")
     generate_tables()
     print(f"\nAll outputs in {OUT}/")

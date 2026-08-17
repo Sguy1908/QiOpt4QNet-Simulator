@@ -14,7 +14,9 @@ dependencies = [
     "dimod==0.12.22",
     "openjij==0.12.1",
     "pyqubo==1.5.0",
-    "minorminer==0.2.22"
+    "minorminer==0.2.22",
+    "dwave-graphs==1.0.0",
+    "dwave-samplers==1.8.0"
 ]
 
 [project.optional-dependencies]

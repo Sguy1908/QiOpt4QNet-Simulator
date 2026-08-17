@@ -9,6 +9,10 @@ from optimization.quantum_annealing_backend import (
     build_hardware_graph, hardware_qubits, default_chain_strength,
     minor_embed, embed_bqm, unembed_by_majority, quantum_anneal_solve,
     chain_strength_sweep, run_quantum_annealing_sweep,
+    build_hardware_graph_pegasus, build_hardware_graph_zephyr,
+    hardware_qubits_pegasus, hardware_qubits_zephyr,
+    _fit_hardware_pegasus, _fit_hardware_zephyr,
+    run_quantum_annealing_topology_sweep,
 )
 from experiments.instances import (
     generate_chain_topology, contention_sweep_instances,
@@ -130,3 +134,103 @@ def test_quantum_annealing_sweep_schema():
     assert r["sa_utility"] >= 0.0
     assert r["sqa_utility"] >= 0.0
     assert r["qa_n_qubits"] > r["n_qubo_variables"]
+
+
+# ---------------------------------------------------------------------------
+# Pegasus / Zephyr hardware topologies
+# ---------------------------------------------------------------------------
+def test_pegasus_graph_structure():
+    hw = build_hardware_graph_pegasus(3)
+    assert len(hw) == hardware_qubits_pegasus(3) == 128
+    for u, nbrs in hw.items():
+        assert len(nbrs) > 0
+        for v in nbrs:
+            assert u in hw[v]  # undirected
+
+
+def test_zephyr_graph_structure():
+    hw = build_hardware_graph_zephyr(2)
+    assert len(hw) == hardware_qubits_zephyr(2) == 160
+    for u, nbrs in hw.items():
+        assert len(nbrs) > 0
+        for v in nbrs:
+            assert u in hw[v]  # undirected
+
+
+def test_fit_hardware_pegasus_monotonic_and_sufficient():
+    m = _fit_hardware_pegasus(100)
+    assert hardware_qubits_pegasus(m) >= 100
+    assert hardware_qubits_pegasus(m - 1) < 100 if m > 2 else True
+    # larger requirement never yields a smaller lattice
+    assert _fit_hardware_pegasus(500) >= _fit_hardware_pegasus(100)
+
+
+def test_fit_hardware_zephyr_monotonic_and_sufficient():
+    m = _fit_hardware_zephyr(100)
+    assert hardware_qubits_zephyr(m) >= 100
+    assert hardware_qubits_zephyr(m - 1) < 100 if m > 1 else True
+    assert _fit_hardware_zephyr(500) >= _fit_hardware_zephyr(100)
+
+
+def test_quantum_anneal_solve_runs_on_pegasus():
+    topo, inst = _instance(n_req=3)
+    res = quantum_anneal_solve(inst["bundles"], inst["edge_capacities"],
+                               inst["memory_capacities"], k=8, num_reads=10,
+                               num_sweeps=100, topology="pegasus", seed=42)
+    assert res["embedded"] is True
+    assert res["topology"] == "pegasus"
+    assert res["lattice_size"] >= 2
+    assert res["utility"] >= 0.0
+    assert 0.0 <= res["chain_break_fraction"] <= 1.0
+    assert res["n_qubits"] > res["n_qubo_variables"]
+
+
+def test_quantum_anneal_solve_runs_on_zephyr():
+    topo, inst = _instance(n_req=3)
+    res = quantum_anneal_solve(inst["bundles"], inst["edge_capacities"],
+                               inst["memory_capacities"], k=8, num_reads=10,
+                               num_sweeps=100, topology="zephyr", seed=42)
+    assert res["embedded"] is True
+    assert res["topology"] == "zephyr"
+    assert res["lattice_size"] >= 1
+    assert res["utility"] >= 0.0
+    assert 0.0 <= res["chain_break_fraction"] <= 1.0
+    assert res["n_qubits"] > res["n_qubo_variables"]
+
+
+def test_quantum_anneal_solve_unknown_topology_raises():
+    topo, inst = _instance(n_req=3)
+    with pytest.raises(ValueError):
+        quantum_anneal_solve(inst["bundles"], inst["edge_capacities"],
+                             inst["memory_capacities"], k=8,
+                             topology="not_a_real_topology")
+
+
+def test_chimera_default_backward_compatible():
+    topo, inst = _instance(n_req=3)
+    a = quantum_anneal_solve(inst["bundles"], inst["edge_capacities"],
+                             inst["memory_capacities"], k=8, num_reads=8,
+                             num_sweeps=80, t=8, seed=1)
+    b = quantum_anneal_solve(inst["bundles"], inst["edge_capacities"],
+                             inst["memory_capacities"], k=8, num_reads=8,
+                             num_sweeps=80, t=8, topology="chimera", seed=1)
+    assert a["utility"] == b["utility"]
+    assert a["selected"] == b["selected"]
+    assert a["n_qubits"] == b["n_qubits"]
+    assert "lattice_size" not in a and "lattice_size" not in b
+
+
+def test_quantum_annealing_topology_sweep_schema():
+    topo_fn = lambda: _topology(n_nodes=6)
+    res = run_quantum_annealing_topology_sweep(
+        topo_fn, n_requests_list=[4], topologies=("chimera", "pegasus", "zephyr"),
+        num_reads=8, num_sweeps=80, k=8, seed=42)
+    assert len(res["rows"]) == 3
+    seen_topologies = {r["topology"] for r in res["rows"]}
+    assert seen_topologies == {"chimera", "pegasus", "zephyr"}
+    for r in res["rows"]:
+        assert r["utility"] >= 0.0
+        assert r["n_qubits"] > r["n_qubo_variables"]
+        assert 0.0 <= r["chain_break_fraction"] <= 1.0
+        if r["topology"] != "chimera":
+            assert r["lattice_size"] is not None

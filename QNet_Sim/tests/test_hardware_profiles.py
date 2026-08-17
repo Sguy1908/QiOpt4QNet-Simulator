@@ -2,7 +2,7 @@ import pytest
 
 from hardware.profiles import (
     IDEAL_PROFILE, SUPERCONDUCTING_PROFILE, HardwareProfile,
-    run_hardware_profile_comparison,
+    run_hardware_profile_comparison, ALL_PROFILES,
 )
 
 
@@ -37,6 +37,17 @@ def test_short_coherence_reduces_delivered_fidelity():
     by_name = {r["profile"]: r for r in rows}
     assert by_name["ideal"]["mean_delivered_fidelity"] >= \
         by_name["superconducting_2024"]["mean_delivered_fidelity"]
+
+
+def test_profiles_have_citations_except_ideal():
+    for p in ALL_PROFILES:
+        if p.name == "ideal":
+            assert p.source is None
+            assert p.source_url_or_doi is None
+        else:
+            assert p.source, f"{p.name} missing a literature citation"
+            assert p.source_url_or_doi, f"{p.name} missing a checkable source URL/DOI"
+            assert "LITERATURE-CALIBRATED" in p.description
 
 
 def _chain_topo():

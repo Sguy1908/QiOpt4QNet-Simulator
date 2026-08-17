@@ -52,13 +52,21 @@ def delivered_fidelity(bundle: dict, hold_time: float, tau_mem: float,
 
 def generate_temporal_bundles(topology: dict, requests: List,
                               q_values: Optional[List[int]] = None,
-                              k_paths: int = 3) -> Dict[str, List[dict]]:
+                              k_paths: int = 3,
+                              hold_time_std_frac: float = 0.0) -> Dict[str, List[dict]]:
     """Build per-request candidate bundles tagged with their temporal profile.
 
     Reuses the paper's bundle evaluator (fidelity after BBPSSW purification,
     swapping, success probability, utility) and attaches the fields the joint
     scheduler needs: ``t_gen``, ``t_consume``, ``hold_time``, ``memory_windows``
     and the request's deadline/priority/n_pairs.
+
+    ``hold_time_std_frac`` (future work item vi, "stochastic-window joint
+    scheduling"): fraction of ``hold_time`` used as the standard deviation of
+    the bundle's *completion*-time uncertainty, stored as ``hold_time_std``.
+    Default ``0.0`` reproduces today's fully deterministic windows exactly
+    (no new key value beyond ``0.0``, byte-identical to before this
+    parameter existed).
     """
     from experiments.instances import generate_request_bundles
     if q_values is None:
@@ -79,6 +87,7 @@ def generate_temporal_bundles(topology: dict, requests: List,
             b["t_gen"] = req.arrival
             b["t_consume"] = req.arrival + b.get("latency", 0.0)
             b["hold_time"] = b["t_consume"] - b["t_gen"]
+            b["hold_time_std"] = hold_time_std_frac * b["hold_time"]
             b["memory_windows"] = temporal_memory_windows(
                 b, req.arrival, req.max_latency)
             tagged.append(b)
@@ -104,7 +113,39 @@ class JointRoutingScheduler:
     def __init__(self, edge_capacities: dict, memory_capacities: dict,
                  tau_mem: float = 5.0, t1: Optional[float] = None,
                  risk_weight: float = 2.0, deadline_weight: float = 0.0,
-                 hard_deadline: bool = True, seed: Optional[int] = None):
+                 hard_deadline: bool = True, seed: Optional[int] = None,
+                 stochastic: bool = False, hold_time_std: float = 0.0,
+                 eps_choices: Optional[List[float]] = None,
+                 eps_risk_weight: float = 1.0, mc_samples: int = 100,
+                 stochastic_others: bool = False):
+        """
+        stochastic : bool
+            Future work item vi ("chance-constrained joint scheduling that
+            co-optimizes epsilon with the temporal admission decision").
+            Default False -- every parameter below is inert and the
+            scheduler is byte-identical to before this feature existed.
+            When True, each candidate bundle is additionally offered at
+            every epsilon in ``eps_choices``; admission uses
+            ``MemoryScheduler.can_reserve_prob`` instead of the exact
+            ``can_reserve``, and ``_energy`` prices the chosen epsilon via
+            ``eps_risk_weight`` -- so the anneal must "earn" a riskier
+            (looser) epsilon through extra served utility, which is what
+            jointly optimizing epsilon with the admission decision means.
+        hold_time_std : float
+            Fallback completion-time std (in the same units as hold_time)
+            used when a bundle doesn't carry its own ``hold_time_std`` (see
+            ``generate_temporal_bundles``'s ``hold_time_std_frac``).
+        eps_choices : list of float, optional
+            Discrete epsilon menu offered per bundle when stochastic=True.
+            Defaults to [0.01, 0.05, 0.1, 0.2, 0.4].
+        eps_risk_weight : float
+            Linear price per unit of epsilon in the energy (only used when
+            stochastic=True).
+        mc_samples : int
+            Monte-Carlo sample budget for each admission check.
+        stochastic_others : bool
+            Passed through to ``can_reserve_prob`` -- see its docstring.
+        """
         self.edge_capacities = {tuple(sorted(k)): v for k, v in edge_capacities.items()}
         self.memory_capacities = dict(memory_capacities)
         self.tau_mem = tau_mem
@@ -112,7 +153,19 @@ class JointRoutingScheduler:
         self.risk_weight = risk_weight
         self.deadline_weight = deadline_weight
         self.hard_deadline = hard_deadline
+        self.stochastic = stochastic
+        self.hold_time_std = hold_time_std
+        self.eps_choices = eps_choices if eps_choices is not None else [0.01, 0.05, 0.1, 0.2, 0.4]
+        self.eps_risk_weight = eps_risk_weight
+        self.mc_samples = mc_samples
+        self.stochastic_others = stochastic_others
         self._rng = random.Random(seed)
+        self._mc_rng = random.Random(seed)
+        # per (request_id, bid) window-fit probability estimated at the
+        # moment of reservation, exposed in schedule() as
+        # "window_fit_prob_est" (stochastic mode only; avoids re-running
+        # the Monte-Carlo estimate a second time just for reporting).
+        self._fit_prob_of: Dict[Tuple[str, str], float] = {}
 
         self._bundles: Dict[str, List[dict]] = {}
         self._bundle_map: Dict[Tuple[str, str], dict] = {}
@@ -153,7 +206,22 @@ class JointRoutingScheduler:
             self._deadline_of[request_id] = b.get("deadline", float("inf"))
             self._arrival_of[request_id] = b.get("arrival", 0.0)
 
-    def _candidates(self, request_id: str) -> List[Optional[str]]:
+    # ------------------------------------------------------------------
+    # stochastic-mode candidate encoding: a "candidate" is either a plain
+    # bundle_id (deterministic mode) or a (bundle_id, eps) tuple
+    # (stochastic mode); None means reject in both modes.
+    # ------------------------------------------------------------------
+    def _bid_of(self, candidate):
+        if candidate is None:
+            return None
+        return candidate[0] if self.stochastic else candidate
+
+    def _eps_of(self, candidate) -> Optional[float]:
+        if candidate is None or not self.stochastic:
+            return None
+        return candidate[1]
+
+    def _candidates(self, request_id: str) -> List:
         pool = [b["bundle_id"] for b in self._bundles.get(request_id, [])]
         if request_id in getattr(self, "_frozen", set()):
             cur = self.selections.get(request_id)
@@ -170,12 +238,15 @@ class JointRoutingScheduler:
                     continue
                 filtered.append(bid)
             pool = filtered
+        if self.stochastic:
+            return [(bid, eps) for bid in pool for eps in self.eps_choices] + [None]
         return pool + [None]
 
     # ------------------------------------------------------------------
     # feasibility bookkeeping (temporal memory is exact)
     # ------------------------------------------------------------------
-    def _release(self, request_id: str, bid: str):
+    def _release(self, request_id: str, candidate):
+        bid = self._bid_of(candidate)
         for rid in self._mem_reservations[request_id]:
             self._memory.release(rid)
         self._mem_reservations[request_id] = []
@@ -185,37 +256,56 @@ class JointRoutingScheduler:
             if self._edge_load[edge] <= 0:
                 self._edge_load.pop(edge, None)
 
-    def _reserve(self, request_id: str, bid: str) -> bool:
+    def _reserve(self, request_id: str, candidate) -> bool:
+        bid = self._bid_of(candidate)
+        eps = self._eps_of(candidate)
         key = (request_id, bid)
-        # edge feasibility first (aggregate over the horizon)
+        b = self._bundle_map[key]
+        # edge feasibility first (aggregate over the horizon) -- unchanged
+        # by stochastic mode: only memory/timing is made probabilistic.
         for edge, d in self._edge_of.get(key, {}).items():
             if self._edge_load.get(edge, 0) + d > self.edge_capacities.get(edge, 0):
                 return False
         # temporal memory feasibility at every instant
         windows = self._windows.get(key, {})
         demand = self._mem_of.get(key, {})
+        hold_std = b.get("hold_time_std", self.hold_time_std) if self.stochastic else 0.0
+        fit_probs = []
         for node, (start, end) in windows.items():
             if start >= end:
                 continue
-            if not self._memory.can_reserve(node, demand.get(node, 0), start, end):
-                return False
+            amount = demand.get(node, 0)
+            if self.stochastic:
+                prob = self._memory.estimate_fit_probability(
+                    node, amount, start, end, start_std=0.0, end_std=hold_std,
+                    n_samples=self.mc_samples, rng=self._mc_rng,
+                    stochastic_others=self.stochastic_others)
+                fit_probs.append(prob)
+                if prob < (1.0 - eps):
+                    return False
+            else:
+                if not self._memory.can_reserve(node, amount, start, end):
+                    return False
         for edge, d in self._edge_of.get(key, {}).items():
             self._edge_load[edge] = self._edge_load.get(edge, 0) + d
         for node, (start, end) in windows.items():
             if start >= end:
                 continue
-            rid = self._memory.reserve(node, demand.get(node, 0), start, end)
+            rid = self._memory.reserve(node, demand.get(node, 0), start, end,
+                                       std=hold_std)
             if rid is not None:
                 self._mem_reservations[request_id].append(rid)
+        if self.stochastic:
+            self._fit_prob_of[key] = min(fit_probs) if fit_probs else 1.0
         return True
 
-    def _apply(self, request_id: str, new_bid: Optional[str]):
-        old_bid = self.selections.get(request_id)
-        if old_bid is not None:
-            self._release(request_id, old_bid)
-        self.selections[request_id] = new_bid
-        if new_bid is not None:
-            ok = self._reserve(request_id, new_bid)
+    def _apply(self, request_id: str, new_candidate):
+        old_candidate = self.selections.get(request_id)
+        if old_candidate is not None:
+            self._release(request_id, old_candidate)
+        self.selections[request_id] = new_candidate
+        if new_candidate is not None:
+            ok = self._reserve(request_id, new_candidate)
             if not ok:  # pragma: no cover - reserve() pre-checked by the caller
                 self.selections[request_id] = None
 
@@ -224,9 +314,11 @@ class JointRoutingScheduler:
     # ------------------------------------------------------------------
     def _energy(self) -> float:
         total = 0.0
-        for request_id, bid in self.selections.items():
-            if bid is None:
+        for request_id, candidate in self.selections.items():
+            if candidate is None:
                 continue
+            bid = self._bid_of(candidate)
+            eps = self._eps_of(candidate)
             key = (request_id, bid)
             b = self._bundle_map[key]
             priority = self._priority_of.get(request_id, 1.0)
@@ -241,6 +333,12 @@ class JointRoutingScheduler:
                 d = self._deadline_of.get(request_id, float("inf"))
                 if completion > d:
                     total += self.deadline_weight * priority * (completion - d)
+            if self.stochastic and eps is not None:
+                # Lagrangian-style price on risk tolerance: a looser
+                # (larger) epsilon must be "earned" by extra served
+                # utility elsewhere -- this is what jointly optimizing
+                # epsilon with the admission decision means.
+                total += self.eps_risk_weight * eps
         for edge, load in self._edge_load.items():
             cap = self.edge_capacities.get(edge, 0)
             if load > cap:
@@ -255,9 +353,11 @@ class JointRoutingScheduler:
                        key=lambda rid: (-self._priority_of.get(rid, 1.0), rid))
         for request_id in order:
             scored = []
-            for bid in self._candidates(request_id):
-                if bid is None:
+            for candidate in self._candidates(request_id):
+                if candidate is None:
                     continue
+                bid = self._bid_of(candidate)
+                eps = self._eps_of(candidate)
                 b = self._bundle_map[(request_id, bid)]
                 hold = b.get("hold_time", 0.0)
                 if self.tau_mem > 0 and hold > self.tau_mem:
@@ -265,11 +365,17 @@ class JointRoutingScheduler:
                 f_del = delivered_fidelity(b, hold, self.tau_mem, self.t1)
                 score = b["utility"] * self._priority_of.get(request_id, 1.0) \
                     - self.risk_weight * (1.0 - f_del)
-                scored.append((score, bid))
+                if eps is not None:
+                    score -= self.eps_risk_weight * eps
+                    # prefer the tightest (smallest) eps among equal-score
+                    # ties, so the greedy seed doesn't gratuitously buy risk
+                    scored.append((score, -eps, candidate))
+                else:
+                    scored.append((score, 0.0, candidate))
             scored.sort(reverse=True)
-            for _, bid in scored:
-                if self._reserve(request_id, bid):
-                    self.selections[request_id] = bid
+            for _, _, candidate in scored:
+                if self._reserve(request_id, candidate):
+                    self.selections[request_id] = candidate
                     break
 
     # ------------------------------------------------------------------
@@ -335,28 +441,29 @@ class JointRoutingScheduler:
         self._frozen = set()
         return self.schedule()
 
-    def _energy_delta(self, request_id: str, old_bid: Optional[str],
-                      new_bid: Optional[str]) -> float:
+    def _energy_delta(self, request_id: str, old_candidate,
+                      new_candidate) -> float:
         """Energy difference between the current state and one where
-        ``request_id``'s assignment changes from ``old_bid`` to ``new_bid``
-        (no mutation)."""
+        ``request_id``'s assignment changes from ``old_candidate`` to
+        ``new_candidate`` (no mutation). Candidates are bundle ids
+        (deterministic mode) or (bundle_id, eps) tuples (stochastic mode)."""
         old_e = self._energy()
-        old_bid_now = self.selections.get(request_id)
+        old_candidate_now = self.selections.get(request_id)
         # temporarily switch (mutating edge/memory state), measure, revert
-        if old_bid_now is not None:
-            self._release(request_id, old_bid_now)
+        if old_candidate_now is not None:
+            self._release(request_id, old_candidate_now)
         self.selections[request_id] = None
-        if new_bid is not None and self._reserve(request_id, new_bid):
-            self.selections[request_id] = new_bid
+        if new_candidate is not None and self._reserve(request_id, new_candidate):
+            self.selections[request_id] = new_candidate
             new_e = self._energy()
         else:
             new_e = self._energy()
         # revert
-        if new_bid is not None and self.selections.get(request_id) == new_bid:
-            self._release(request_id, new_bid)
-        self.selections[request_id] = old_bid_now
-        if old_bid_now is not None:
-            self._reserve(request_id, old_bid_now)
+        if new_candidate is not None and self.selections.get(request_id) == new_candidate:
+            self._release(request_id, new_candidate)
+        self.selections[request_id] = old_candidate_now
+        if old_candidate_now is not None:
+            self._reserve(request_id, old_candidate_now)
         return new_e - old_e
 
     # ------------------------------------------------------------------
@@ -371,15 +478,17 @@ class JointRoutingScheduler:
         total_pairs = 0
         latency_sum = 0.0
         served = 0
-        for request_id, bid in self.selections.items():
-            if bid is None:
+        for request_id, candidate in self.selections.items():
+            if candidate is None:
                 continue
+            bid = self._bid_of(candidate)
+            eps = self._eps_of(candidate)
             b = self._bundle_map[(request_id, bid)]
             hold = b.get("hold_time", 0.0)
             f_del = delivered_fidelity(b, hold, self.tau_mem, self.t1)
             completion = self._arrival_of.get(request_id, 0.0) + b.get("latency", 0.0)
             on_time = completion <= self._deadline_of.get(request_id, float("inf"))
-            decisions.append({
+            decision = {
                 "request_id": request_id,
                 "bundle_id": bid,
                 "path": b.get("path", []),
@@ -391,7 +500,12 @@ class JointRoutingScheduler:
                 "hold_time": hold,
                 "n_pairs": b.get("n_pairs", 1),
                 "latency": b.get("latency", 0.0),
-            })
+            }
+            if self.stochastic:
+                decision["eps"] = eps
+                decision["window_fit_prob_est"] = self._fit_prob_of.get(
+                    (request_id, bid), 1.0)
+            decisions.append(decision)
             delivered_fids.append(f_del)
             deadlines_met += int(on_time)
             total_pairs += b.get("n_pairs", 1)
@@ -414,6 +528,115 @@ class JointRoutingScheduler:
             "mean_memory_utilization": self._memory.utilization(0.0, t_max, max(t_max / 50.0, 1e-3)),
             "energy": self._energy(),
         }
+
+
+def run_stochastic_chance_joint_study(topology_fn: Callable, n_slots: int = 20,
+                                      mean_rate: float = 1.5, tau_mem: float = 5.0,
+                                      hold_time_std_frac: float = 0.15,
+                                      eps_choices: Optional[List[float]] = None,
+                                      eps_risk_weight_list: Optional[List[float]] = None,
+                                      n_instances: int = 3, mc_samples: int = 100,
+                                      seed: int = 42) -> Dict:
+    """Future work items iv + vi: stochastic-window joint scheduling and
+    chance-constrained joint scheduling that co-optimizes epsilon with the
+    temporal admission decision.
+
+    Compares three regimes on IDENTICAL stochastic-hold traces:
+      - "deterministic": the unchanged legacy path (stochastic=False).
+      - "stochastic_fixed_eps(eps=..)": epsilon is externally fixed (a
+        single-choice eps_choices list), not optimized -- mirrors the old
+        chance-constrained study's external eps sweep, now applied to the
+        temporal admission decision instead of a static candidate filter.
+      - "stochastic_coopt_eps": epsilon is a per-request decision variable
+        the anneal jointly optimizes alongside (bundle, admission-time)
+        via the full eps_choices menu.
+
+    Reports served_ratio, utility, mean chosen eps, and a POST-HOC empirical
+    SLA-violation estimate from an INDEPENDENT, larger Monte-Carlo replay of
+    the committed windows (a separate sample budget from the one used inside
+    the anneal, to avoid optimistic self-validation).
+    """
+    from routing.temporal_request import generate_dynamic_trace
+    import random as _random
+
+    if eps_choices is None:
+        eps_choices = [0.01, 0.05, 0.1, 0.2, 0.4]
+    if eps_risk_weight_list is None:
+        eps_risk_weight_list = [1.0]
+
+    rows = []
+    for inst in range(n_instances):
+        inst_seed = seed + inst
+        topo = topology_fn()
+        ec, mc = topo["edge_capacities"], topo["memory_capacities"]
+        trace = generate_dynamic_trace(topo, n_slots, mean_rate,
+                                       deadline_horizon=6.0, seed=inst_seed)
+        bundles = generate_temporal_bundles(topo, trace,
+                                            hold_time_std_frac=hold_time_std_frac)
+
+        regimes = [("deterministic", False, [0.0], 0.0)]
+        for eps in eps_choices:
+            regimes.append((f"stochastic_fixed_eps({eps})", True, [eps], 1.0))
+        for w in eps_risk_weight_list:
+            regimes.append((f"stochastic_coopt_eps(w={w})", True, eps_choices, w))
+
+        for label, stochastic, this_eps_choices, eps_w in regimes:
+            sched = JointRoutingScheduler(
+                ec, mc, tau_mem=tau_mem, hard_deadline=True, risk_weight=2.0,
+                seed=inst_seed, stochastic=stochastic,
+                eps_choices=this_eps_choices, eps_risk_weight=eps_w,
+                mc_samples=mc_samples)
+            for rid, bs in bundles.items():
+                sched.add_request(rid, bs)
+            result = sched.solve(max_iterations=1500, n_restarts=2)
+
+            mean_eps = None
+            if stochastic and result["decisions"]:
+                mean_eps = sum(d["eps"] for d in result["decisions"]) / len(result["decisions"])
+
+            # Post-hoc empirical SLA-violation estimate: independent replay
+            # of each committed window's actual fit probability, using a
+            # LARGER, separate sample budget than the one used during the
+            # anneal (avoids optimistic self-validation).
+            violations = 0
+            checked = 0
+            if stochastic:
+                validation_memory = MemoryScheduler(mc)
+                validation_rng = random.Random(inst_seed + 1000)
+                for d in result["decisions"]:
+                    key = (d["request_id"], d["bundle_id"])
+                    windows = sched._windows.get(key, {})
+                    demand = sched._mem_of.get(key, {})
+                    b = sched._bundle_map.get(key, {})
+                    hold_std = b.get("hold_time_std", 0.0)
+                    for node, (start, end) in windows.items():
+                        if start >= end:
+                            continue
+                        checked += 1
+                        prob = validation_memory.estimate_fit_probability(
+                            node, demand.get(node, 0), start, end,
+                            end_std=hold_std, n_samples=mc_samples * 3,
+                            rng=validation_rng)
+                        if prob < (1.0 - d["eps"]):
+                            violations += 1
+                        validation_memory.reserve(node, demand.get(node, 0),
+                                                  start, end, std=hold_std)
+
+            rows.append({
+                "instance": inst,
+                "regime": label,
+                "served": result["served"],
+                "n_requests": result["n_requests"],
+                "served_ratio": result["served_ratio"],
+                "mean_delivered_fidelity": result["mean_delivered_fidelity"],
+                "utility": sum(d["n_pairs"] * b.get("utility", 0.0)
+                               for d, b in ((d, sched._bundle_map.get((d["request_id"], d["bundle_id"]), {}))
+                                            for d in result["decisions"])),
+                "mean_eps": mean_eps,
+                "empirical_violation_rate": (violations / checked) if checked else None,
+            })
+
+    return {"rows": rows}
 
 
 def run_joint_comparison(topology_fn: Callable, n_slots: int = 20,

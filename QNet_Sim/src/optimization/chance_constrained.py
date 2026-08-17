@@ -83,16 +83,41 @@ def hard_feasible(nominal_f: float, min_fidelity: float) -> bool:
     return nominal_f >= min_fidelity
 
 
-def sample_truncnorm(mu: float, sigma: float, rng: random.Random,
-                     lo: float = 0.0, hi: float = 1.0) -> float:
-    """Rejection-sample the truncated normal used by the model."""
+def sample_bounded_normal(mu: float, sigma: float, rng: random.Random,
+                          lo: Optional[float] = None,
+                          hi: Optional[float] = None) -> float:
+    """Rejection-sample N(mu, sigma^2), optionally truncated to [lo, hi]
+    (either bound may be omitted for an unbounded/half-bounded draw).
+
+    Generalizes the fidelity-specific ``sample_truncnorm`` (below, now a
+    thin wrapper) for reuse by future-work item vi's stochastic-window
+    joint scheduling, where the bounded quantity is a completion time, not
+    a fidelity in [0, 1]."""
     if sigma <= 0:
-        return min(max(mu, lo), hi)
+        x = mu
+        if lo is not None:
+            x = max(x, lo)
+        if hi is not None:
+            x = min(x, hi)
+        return x
     for _ in range(10000):
         x = rng.gauss(mu, sigma)
-        if lo <= x <= hi:
+        if (lo is None or x >= lo) and (hi is None or x <= hi):
             return x
-    return min(max(mu, lo), hi)
+    x = mu
+    if lo is not None:
+        x = max(x, lo)
+    if hi is not None:
+        x = min(x, hi)
+    return x
+
+
+def sample_truncnorm(mu: float, sigma: float, rng: random.Random,
+                     lo: float = 0.0, hi: float = 1.0) -> float:
+    """Rejection-sample the truncated normal used by the fidelity model.
+    Thin wrapper over ``sample_bounded_normal`` -- kept for backward
+    compatibility with existing callers/tests."""
+    return sample_bounded_normal(mu, sigma, rng, lo=lo, hi=hi)
 
 
 # ----------------------------------------------------------------------
