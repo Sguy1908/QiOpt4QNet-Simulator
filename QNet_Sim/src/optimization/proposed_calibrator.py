@@ -82,31 +82,29 @@ def _penalty_drop(other_load: int, demand: int, capacity: int) -> float:
     after = max(0, other_load - capacity) ** 2
     return float(before - after)
 
-
-def coefficient_bound(
+def resource_bounds(
     grouped_demands: Mapping[object, Sequence[Tuple[BundleKey, int]]],
     capacities: Mapping[object, int],
     utilities: Mapping[BundleKey, float],
-) -> float:
-    """Return the largest resource-aware single-removal coefficient bound."""
-    bound = 0.0
-
+) -> Dict[object, float]:
+    """Return the single-removal coefficient bound for each resource.
+    A resource whose capacity can never be exceeded maps to 0.0.
+    """
+    bounds: Dict[object, float] = {}
     for resource, key_demand_pairs in grouped_demands.items():
         if resource not in capacities:
             raise ValueError(f"missing capacity for resource {resource!r}")
         capacity = int(capacities[resource])
         if capacity < 0:
-            raise ValueError("resource capacities must be nonnegative")
-
+            raise ValueError("resource capacity must be nonnegative")
+        bounds[resource] = 0.0
         loads_cache: Dict[Tuple[str, int], set[int]] = {}
-
         for key, demand_raw in key_demand_pairs:
             demand = int(demand_raw)
-            if demand <= 0:
+            if demand <=0:
                 continue
-
             request_id = key[0]
-            cache_key = (request_id, demand)
+            cache_key=(request_id, demand)
             if cache_key not in loads_cache:
                 loads_cache[cache_key] = possible_loads(
                     key_demand_pairs,
@@ -116,22 +114,28 @@ def coefficient_bound(
                 )
             loads = loads_cache[cache_key]
 
-            violating = [load for load in loads if load + demand > capacity]
+            violating=[load for load in loads if load+demand>capacity]
             if not violating:
                 continue
-
-            # Once violation begins, the squared-overload penalty drop grows
-            # monotonically with the competing load. The smallest reachable
-            # violating load is therefore the worst case.
-            other_load = min(violating)
+            other_load=min(violating)
             delta = _penalty_drop(other_load, demand, capacity)
             if delta <= 0:
                 continue
+            utility=max(0.0, float(utilities.get(key, 0.0)))
+            bounds[resource] = max(bounds[resource], utility / delta)
+    return bounds
 
-            utility = max(0.0, float(utilities.get(key, 0.0)))
-            bound = max(bound, utility / delta)
+def coefficient_bound(
+        grouped_demands: Mapping[object, Sequence[Tuple[BundleKey, int]]],
+        capacities: Mapping[object, int],
+        utilities: Mapping[BundleKey, float],
+) -> float:
+    """Return the largest resource-aware single-removal coefficient bound."""
+    return max(
+        resource_bounds(grouped_demands, capacities, utilities).values(),
+        default=0.0,
+    )
 
-    return bound
 
 
 def proposed_global_coefficients(
@@ -169,5 +173,43 @@ def proposed_global_coefficients(
         "B": safety_factor * edge_bound + epsilon,
         "C": float(congestion_penalty),
         "D": safety_factor * memory_bound + epsilon,
+        "E": float(memory_congestion_penalty),
+    }
+
+def proposed_resource_coefficients(
+    optimizer,
+    *,
+    safety_factor: float = 1.0,
+    congestion_penalty: float = 0.0,
+    memory_congestion_penalty: float = 0.0,
+) -> Dict[str, object]:
+    """Return per-resource QUBO coefficients for one problem instance."""
+    if safety_factor <= 0:
+        raise ValueError("safety_factor must be positive")
+
+    utilities: Dict[BundleKey, float] = {}
+    for bundle in optimizer.bundles:
+        key = optimizer._bundle_key(bundle)
+        utilities[key] = max(0.0, float(bundle["utility"]))
+
+    p0 = positive_utility_scale(optimizer)
+    epsilon = penalty_epsilon(p0)
+
+    edge_bounds = resource_bounds(
+        optimizer.edge_demands,
+        optimizer.edge_capacities,
+        utilities,
+    )
+    memory_bounds = resource_bounds(
+        optimizer.memory_demands,
+        optimizer.memory_capacities,
+        utilities,
+    )
+
+    return {
+        "A": safety_factor * p0 + epsilon,
+        "B": {e: safety_factor * v + epsilon for e, v in edge_bounds.items()},
+        "C": float(congestion_penalty),
+        "D": {n: safety_factor * v + epsilon for n, v in memory_bounds.items()},
         "E": float(memory_congestion_penalty),
     }

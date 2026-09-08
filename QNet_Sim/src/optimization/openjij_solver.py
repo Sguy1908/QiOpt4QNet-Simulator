@@ -4,7 +4,8 @@ The low-level SA/SQA entry points remain available. The calibrated helpers make
 three experiment modes explicit:
 
 * conventional: utility-scale reference calibration;
-* resource_aware: proposed edge/memory-aware calibration;
+* resource_aware: proposed edge/memory-aware calibration. one global coefficient per resource family;
+* resource_aware_per: the same certtificate scoped per resource;
 * fixed: user-supplied coefficients for legacy/sensitivity runs.
 
 Soft congestion C/E is kept separate from hard-constraint A/B/D calibration.
@@ -35,7 +36,7 @@ def calibrated_coefficients(
     fixed_coefficients: Optional[Mapping[str, float]] = None,
     congestion_penalty: float = 0.0,
     memory_congestion_penalty: float = 0.0,
-) -> Dict[str, float]:
+) -> Dict[str, object]:
     """Return QUBO coefficients for a named calibration strategy."""
     if coefficient_scale <= 0:
         raise ValueError("coefficient_scale must be positive")
@@ -54,6 +55,14 @@ def calibrated_coefficients(
         from .proposed_calibrator import proposed_global_coefficients
 
         coeffs = proposed_global_coefficients(
+            optimizer,
+            congestion_penalty=congestion_penalty,
+            memory_congestion_penalty=memory_congestion_penalty,
+        )
+    elif strategy in {"resource_aware_per", "per_resource"}:
+        from .proposed_calibrator import proposed_resource_coefficients
+
+        coeffs = proposed_resource_coefficients(
             optimizer,
             congestion_penalty=congestion_penalty,
             memory_congestion_penalty=memory_congestion_penalty,
@@ -80,7 +89,11 @@ def calibrated_coefficients(
 
     # Sensitivity scaling applies only to hard constraints.
     for key in ("A", "B", "D"):
-        coeffs[key] *= coefficient_scale
+        value=coeffs[key]
+        if isinstance(value,dict):
+            coeffs[key] = {k: v * coefficient_scale for k, v in value.items()}
+        else:
+            coeffs[key] *= coefficient_scale
 
     return coeffs
 
