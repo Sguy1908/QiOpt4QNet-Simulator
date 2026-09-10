@@ -1,0 +1,4 @@
+eval_topology,n_requests,gnn_zero_shot_served_ratio,gnn_zero_shot_utility,gnn_in_distribution_served_ratio,gnn_in_distribution_utility,full_qubo_served_ratio,full_qubo_utility
+ring_8,10,0.4,191.61818909421356,0.4,191.61818909421356,0.3,125.31342150170556
+erdos_renyi_8,10,0.4,191.39524633120783,0.4,191.39524633120783,0.3,84.72289464635433
+barabasi_albert_8,10,0.3,176.47574892678062,0.3,176.47574892678062,0.4,179.67517917648416
