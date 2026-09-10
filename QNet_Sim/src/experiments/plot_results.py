@@ -648,6 +648,85 @@ def fig_rl_generalization():
     print(f"Saved {path}")
 
 
+def fig_chance_purification():
+    """Future work: joint chance-constrained and purification optimization.
+    Served ratio, utility, and mean purification rounds versus the
+    SLA-violation budget epsilon, for a purification-agnostic (q=0 only)
+    versus purification-aware (q up to 4) candidate set."""
+    if not HAS_MPL:
+        return
+    rows = _load(os.path.join(DATA, "chance_purification_tradeoff.csv"))
+    n_requests = 8
+    colors = {"agnostic": "#c44e52", "aware": "#4c72b0"}
+
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.2))
+    for regime, color in colors.items():
+        sub = sorted([r for r in rows if r["regime"] == regime],
+                    key=lambda r: -float(r["epsilon"]))
+        eps = [float(r["epsilon"]) for r in sub]
+        served_ratio = [float(r["served"]) / n_requests for r in sub]
+        utility = [float(r["utility"]) for r in sub]
+        mean_q = [float(r["mean_purif_rounds"]) for r in sub]
+        axes[0].plot(eps, served_ratio, marker="o", color=color, label=regime,
+                    linewidth=2)
+        axes[1].plot(eps, utility, marker="o", color=color, label=regime,
+                    linewidth=2)
+        axes[2].plot(eps, mean_q, marker="o", color=color, label=regime,
+                    linewidth=2)
+
+    for ax, ylabel, title in [
+        (axes[0], "Served ratio", "Coverage vs. reliability budget"),
+        (axes[1], "Aggregate utility", "Utility vs. reliability budget"),
+        (axes[2], "Mean purification rounds (selected)",
+         "Purification use vs. reliability budget"),
+    ]:
+        ax.set_xlabel(r"SLA-violation budget $\varepsilon$")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.invert_xaxis()
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    path = os.path.join(OUT, "chance_purification_tradeoff.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved {path}")
+
+
+def fig_gnn_generalization():
+    """Future work: cross-topology generalization of the GNN-guided ranker.
+    Compares zero-shot transfer against in-distribution retraining and the
+    full-QUBO reference on three held-out topology families."""
+    if not HAS_MPL:
+        return
+    rows = _load(os.path.join(DATA, "gnn_topology_generalization.csv"))
+    topos = [r["eval_topology"] for r in rows]
+    x = range(len(topos))
+    width = 0.25
+    series = [
+        ("GNN (zero-shot)", "gnn_zero_shot_utility", "#c44e52"),
+        ("GNN (in-distribution)", "gnn_in_distribution_utility", "#4c72b0"),
+        ("Full-QUBO reference", "full_qubo_utility", "#55a868"),
+    ]
+    fig, ax = plt.subplots(figsize=(9, 4.6))
+    for i, (label, key, color) in enumerate(series):
+        vals = [float(r[key]) for r in rows]
+        ax.bar([xi + (i - 1) * width for xi in x], vals, width, label=label,
+              color=color, alpha=0.85)
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(topos)
+    ax.set_ylabel("Aggregate utility")
+    ax.set_title("GNN ranker: zero-shot vs. in-distribution vs. full QUBO")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3, axis="y")
+    plt.tight_layout()
+    path = os.path.join(OUT, "gnn_topology_generalization.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved {path}")
+
+
 def fig_hardware_profiles():
     if not HAS_MPL:
         return
@@ -804,7 +883,7 @@ def fig_robust_routing():
     ax.plot(xs, loss, marker="s", color="#ff7f0e", label="Nominal loss (price of robustness)")
     ax.set_xlabel("Bottleneck failure probability")
     ax.set_ylabel("Utility (robust vs nominal)")
-    ax.set_title("Robustness gain grows with uncertainty")
+    ax.set_title("Robustness gain vs. failure probability")
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
@@ -1609,6 +1688,8 @@ if __name__ == "__main__":
     fig_adaptive_bond_dimension()
     fig_mps_ordering()
     fig_rl_generalization()
+    fig_chance_purification()
+    fig_gnn_generalization()
     print("\nGenerating tables...")
     generate_tables()
     print(f"\nAll outputs in {OUT}/")
