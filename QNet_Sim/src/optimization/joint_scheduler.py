@@ -536,6 +536,7 @@ def run_stochastic_chance_joint_study(topology_fn: Callable, n_slots: int = 20,
                                       eps_choices: Optional[List[float]] = None,
                                       eps_risk_weight_list: Optional[List[float]] = None,
                                       n_instances: int = 3, mc_samples: int = 100,
+                                      deadline_horizon: float = 6.0,
                                       seed: int = 42) -> Dict:
     """Future work items iv + vi: stochastic-window joint scheduling and
     chance-constrained joint scheduling that co-optimizes epsilon with the
@@ -570,7 +571,7 @@ def run_stochastic_chance_joint_study(topology_fn: Callable, n_slots: int = 20,
         topo = topology_fn()
         ec, mc = topo["edge_capacities"], topo["memory_capacities"]
         trace = generate_dynamic_trace(topo, n_slots, mean_rate,
-                                       deadline_horizon=6.0, seed=inst_seed)
+                                       deadline_horizon=deadline_horizon, seed=inst_seed)
         bundles = generate_temporal_bundles(topo, trace,
                                             hold_time_std_frac=hold_time_std_frac)
 

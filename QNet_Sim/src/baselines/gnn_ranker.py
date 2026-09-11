@@ -106,6 +106,27 @@ class GraphFeatureBuilder:
         return 4
 
 
+N_BUNDLE_FEATS = 2  # purification_rounds, fidelity
+
+
+def _bundle_feats(bundle: Optional[dict]) -> np.ndarray:
+    """Per-bundle scalar features the path/graph structure cannot express.
+
+    Two bundles can share an identical path (differing only in purification
+    rounds) or traverse topologically symmetric paths (e.g. on a ring); the
+    structural node/edge features are then identical and a path-only score
+    cannot distinguish them (see the cross-topology generalization pilot).
+    Appending these breaks that tie without changing the model for callers
+    that only have a bare path (``bundle=None`` -> zeros, unchanged score).
+    """
+    if bundle is None:
+        return np.zeros(N_BUNDLE_FEATS)
+    return np.array([
+        float(bundle.get("purification_rounds", 0)),
+        float(bundle.get("fidelity", 0.0)),
+    ])
+
+
 class GraphSAGERanker:
     """Trainable GraphSAGE-style ranker with a numpy MLP head."""
 
@@ -121,7 +142,7 @@ class GraphSAGERanker:
         d0 = self.graph.node_feats.shape[1]
         d1 = self.graph.edge_feat_dim()
         self.W = rng.standard_normal((d0 + d1, hidden)) * 0.1
-        self.W1 = rng.standard_normal((hidden + d1, 16)) * 0.1
+        self.W1 = rng.standard_normal((hidden + d1 + N_BUNDLE_FEATS, 16)) * 0.05
         self.b1 = np.zeros(16)
         self.W2 = rng.standard_normal((16, 1)) * 0.1
         self.b2 = np.zeros(1)
@@ -144,13 +165,16 @@ class GraphSAGERanker:
             emb[i] = np.maximum(0.0, self.W.T @ A)
         return emb
 
-    def _path_embedding(self, path: List[str]) -> np.ndarray:
+    def _path_embedding(self, path: List[str],
+                        bundle: Optional[dict] = None) -> np.ndarray:
         emb = self._node_embeddings()
         idx = self.graph.path_node_indices(path)
         if not idx:
-            return np.zeros(self.hidden + self.graph.edge_feat_dim())
+            return np.zeros(self.hidden + self.graph.edge_feat_dim()
+                            + N_BUNDLE_FEATS)
         node_mean = emb[idx].mean(axis=0)
-        return np.concatenate([node_mean, self.graph.path_edge_mean(path)])
+        return np.concatenate([node_mean, self.graph.path_edge_mean(path),
+                               _bundle_feats(bundle)])
 
     def _score(self, z: np.ndarray) -> float:
         a = z @ self.W1 + self.b1
@@ -161,18 +185,30 @@ class GraphSAGERanker:
         out = {}
         for b in bundles:
             path = b.get("path", [])
-            z = self._path_embedding(path)
+            z = self._path_embedding(path, bundle=b)
             out[(b["request_id"], b["bundle_id"])] = self._score(z)
         return out
 
-    def score(self, path: List[str]) -> float:
-        return self._score(self._path_embedding(path))
+    def score(self, path: List[str], bundle: Optional[dict] = None) -> float:
+        return self._score(self._path_embedding(path, bundle=bundle))
 
     # ------------------------------------------------------------------
     # training (manual backprop, full-batch SGD)
     # ------------------------------------------------------------------
     def fit(self, bundles: List[dict], targets: Dict[Tuple[str, str], float],
             epochs: int = 200, log_every: int = 50) -> Dict:
+        # Regression targets (bundle utilities) can be O(1-100) while the
+        # raw node/edge features are O(1-10); fitting that gap by growing
+        # W1/W2 during plain full-batch SGD reliably drives every hidden
+        # unit's pre-activation negative ("dead ReLU"), after which the
+        # score collapses to the bias term regardless of input. Only the
+        # *ranking* (relative order) of scores is ever used downstream, so
+        # training on a normalized target is equivalent for every caller
+        # and removes the incentive to blow up the weights.
+        raw_targets = {k: v for k, v in targets.items()}
+        scale = max((abs(v) for v in raw_targets.values()), default=1.0) or 1.0
+        targets = {k: v / scale for k, v in raw_targets.items()}
+
         samples = [(b, targets.get((b["request_id"], b["bundle_id"]), 0.0))
                    for b in bundles
                    if (b["request_id"], b["bundle_id"]) in targets]
@@ -229,7 +265,7 @@ class GraphSAGERanker:
                 continue
             edge_mean = self.graph.path_edge_mean(b.get("path", []))
             node_mean = H[idx].mean(axis=0)
-            z = np.concatenate([node_mean, edge_mean])
+            z = np.concatenate([node_mean, edge_mean, _bundle_feats(b)])
             a = z @ self.W1 + self.b1
             r = np.maximum(0.0, a)
             out = float((r @ self.W2 + self.b2).item())

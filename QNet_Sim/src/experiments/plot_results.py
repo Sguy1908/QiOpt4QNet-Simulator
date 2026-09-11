@@ -727,6 +727,52 @@ def fig_gnn_generalization():
     print(f"Saved {path}")
 
 
+def fig_psc_comparison():
+    """Future work: network-level, conflict-aware purification scheduling
+    (PSC) versus the per-request threshold and greedy baselines it was
+    designed to beat."""
+    if not HAS_MPL:
+        return
+    rows = _load(os.path.join(DATA, "psc_comparison.csv"))
+    strategies = ["threshold", "greedy", "psc"]
+    colors = {"threshold": "#c44e52", "greedy": "#dd8452", "psc": "#4c72b0"}
+    n_pairs_vals = sorted(set(int(r["n_pairs"]) for r in rows))
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.6))
+    x = range(len(n_pairs_vals))
+    width = 0.25
+    for i, strat in enumerate(strategies):
+        cost_by_n = []
+        thr_by_n = []
+        for n in n_pairs_vals:
+            sub = [r for r in rows if r["strategy"] == strat and int(r["n_pairs"]) == n]
+            cost_by_n.append(sum(float(r["purification_cost"]) for r in sub) / len(sub))
+            thr_by_n.append(sum(float(r["throughput_ratio"]) for r in sub) / len(sub))
+        ax1.bar([xi + (i - 1) * width for xi in x], cost_by_n, width,
+                label=strat, color=colors[strat], alpha=0.85)
+        ax2.bar([xi + (i - 1) * width for xi in x], thr_by_n, width,
+                label=strat, color=colors[strat], alpha=0.85)
+
+    for ax, ylabel, title in [
+        (ax1, "Mean Bell pairs spent on purification",
+         "Resource cost (lower is better)"),
+        (ax2, "Mean throughput ratio", "Throughput (ties are expected)"),
+    ]:
+        ax.set_xticks(list(x))
+        ax.set_xticklabels([str(n) for n in n_pairs_vals])
+        ax.set_xlabel("Requests per instance")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3, axis="y")
+
+    plt.tight_layout()
+    path = os.path.join(OUT, "psc_comparison.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved {path}")
+
+
 def fig_hardware_profiles():
     if not HAS_MPL:
         return
@@ -1690,6 +1736,7 @@ if __name__ == "__main__":
     fig_rl_generalization()
     fig_chance_purification()
     fig_gnn_generalization()
+    fig_psc_comparison()
     print("\nGenerating tables...")
     generate_tables()
     print(f"\nAll outputs in {OUT}/")
