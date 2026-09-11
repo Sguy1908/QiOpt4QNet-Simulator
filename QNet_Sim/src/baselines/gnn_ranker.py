@@ -117,7 +117,7 @@ def _bundle_feats(bundle: Optional[dict]) -> np.ndarray:
     structural node/edge features are then identical and a path-only score
     cannot distinguish them (see the cross-topology generalization pilot).
     Appending these breaks that tie without changing the model for callers
-    that only have a bare path (``bundle=None`` -> zeros, unchanged score).
+    that only have a bare path (``bundle=None`` -> zero-filled new features).
     """
     if bundle is None:
         return np.zeros(N_BUNDLE_FEATS)
