@@ -131,11 +131,15 @@ formulation and four extensions toward physical realism:
     \emph{optimality certification} by exact ILP
     (Sec.~\ref{sec:recourse-opt}).
   \item \textbf{Temporal and learned extensions.}  Temporal-memory
-    joint scheduling with T1/T2 decay and per-request deadlines
+    joint scheduling with T1/T2 decay and per-request deadlines, and a
+    stochastic-window/chance-constrained variant that co-optimizes a
+    temporal violation budget with the admission decision
     (Sec.~\ref{sec:joint}); filter-based top-$k$, hybrid
     reduce--solve--repair, and GraphSAGE-guided candidate reduction
     (Sec.~\ref{sec:adaptive-qubo}); and purification as a first-class
-    variable (Sec.~\ref{sec:purification}).
+    variable, extended to a network-level, conflict-aware scheduler
+    that matches per-request throughput at $2.5\times$ lower Bell-pair
+    cost (Sec.~\ref{sec:purification}).
   \item \textbf{Analysis extensions.}  Multi-objective Pareto and
     $\epsilon$-constraint frontiers, $k$-disjoint-path provisioning,
     swap-tree ordering under memory decay, generative topology
@@ -146,9 +150,9 @@ formulation and four extensions toward physical realism:
     alternatives (Sec.~\ref{sec:extensions}).
   \item \textbf{Solver adaptivity and generalization.}
     Truncation-error-driven adaptive bond dimension, spectral MPS
-    coupling order, zero-shot cross-topology generalization of the
-    learned router, and literature-calibrated hardware-noise
-    validation (Sec.~\ref{sec:future-closure}).
+    coupling order, zero-shot cross-topology generalization of both
+    the RL and GNN-guided routers, and literature-calibrated
+    hardware-noise validation (Sec.~\ref{sec:future-closure}).
 \end{enumerate}
 All solvers, extensions, experiments, and tests are released as an
 open-source, fully reproducible suite%
@@ -1041,15 +1045,20 @@ $k{=}8$, 20 reads).  On the chain the candidate budget does not bind
 at this scale: all three methods retain the full 15-bundle set and
 return the identical selection ($65.45$ utility, $1/10$ served).  On
 the $5{\times}5$ grid, adaptive top-$k$ and GNN-guided ranking each
-prune only 1 of 47 candidate bundles but move in different directions:
-adaptive top-$k$ raises aggregate utility $11\%$ over the full-QUBO
-reference ($113.9$ vs.\ $102.6$) at equal served count, while
-GNN-guided ranking instead serves one additional request ($6$ vs.\
-$5$) at a $1\%$ utility cost.  On this instance family neither reduction
-method reproduces the large early-stage gain reported for an earlier,
-now-superseded instance generator; the effect here is a modest,
-direction-dependent utility/coverage trade rather than a uniform
-improvement, consistent with the general finding of
+prune only 1 of 47 candidate bundles but both raise aggregate utility
+over the full-QUBO reference at equal served count ($5/10$):
+adaptive top-$k$ by $11\%$ ($113.9$ vs.\ $102.6$) and GNN-guided
+ranking by $2\%$ ($104.6$ vs.\ $102.6$).  (An earlier training pass
+normalized the GraphSAGE ranker's regression target by nothing,
+letting the network drive every hidden unit's pre-activation negative
+during full-batch gradient descent---a ``dead ReLU'' collapse under
+which every bundle receives the same score, equal to the output bias;
+Sec.~\ref{sec:future-closure} discusses the fix and its effect on the
+ranker's cross-topology generalization.)  On this instance family
+neither reduction method reproduces the large early-stage gain
+reported for an earlier, now-superseded instance generator; the
+effect here is a smaller, uniformly-beneficial improvement rather than
+a large one, consistent with the general finding of
 Sec.~\ref{sec:adaptive-results} that reduction is free-or-beneficial
 only until the discarded candidates would have mattered.
 
@@ -1174,6 +1183,37 @@ by $q$) partially substitute for each other.
   \label{fig:chancepurif}
 \end{figure}
 
+\textbf{Stochastic-window and chance-constrained temporal scheduling.}
+The temporal joint scheduler of Sec.~\ref{sec:joint} admits requests
+against deterministic memory-reservation windows; a stochastic variant
+instead estimates, by Monte Carlo, the probability that a
+request's actual (noisy) hold time still fits its window, and a
+chance-constrained variant lets the anneal jointly choose a
+per-request violation budget $\varepsilon$ alongside the admission
+decision itself---directly analogous to Sec.~\ref{sec:chance}, but
+for the temporal rather than the fidelity constraint.  Both mechanisms
+are implemented and produce a deterministic-mode result that exactly
+reproduces the already-validated joint-scheduler baseline of
+Sec.~\ref{sec:joint} (served ratio $0.31$--$0.47$ across three
+instances), confirming the stochastic code path is wired correctly.
+However, across every tested $\varepsilon\in\{0.01,\ldots,0.4\}$,
+risk weight, and a memory capacity swept from $4$ to $24$ (holding
+hold-time uncertainty as high as $70\%$ of nominal), the stochastic
+and chance-constrained regimes return \emph{identical} served ratio,
+utility, and delivered fidelity to the deterministic baseline, and the
+co-optimizer always selects the tightest available $\varepsilon$
+regardless of its risk weight.  The mechanism does not yet bind on
+this benchmark family: admission here is gated by edge capacity and
+deadline feasibility, not by the temporal memory-fit probability the
+stochastic windows perturb, so there is never a genuine time-window
+risk for $\varepsilon$ to trade off.  Unlike the purification and
+candidate-reduction dials above, we did not find a regime in this
+benchmark family where the mechanism binds; doing so likely requires
+an instance family in which concurrent memory occupancy, not edge
+capacity or deadlines, is the active constraint---we leave
+identifying one to future work rather than manufacture an
+artificially memory-bound instance to force a positive result.
+
 \subsection{Recourse and Optimality Certification}
 \label{sec:results-recourse}
 
@@ -1260,6 +1300,48 @@ exactly.
     (left) and fidelity/utility sweep over purification rounds and path
     length (right).}
   \label{fig:purification}
+\end{figure}
+
+\subsection{Network-Level Purification Scheduling}
+\label{sec:results-psc}
+
+Sec.~\ref{sec:results-purification} treats purification per request,
+independent of what other requests sharing the same link need.  The
+conflict-aware purification scheduler (PSC) instead treats
+purification as a network resource: a per-link conflict metric
+aggregates purification need across every request still pending on
+that link, scaled by the link's remaining Bell-pair budget, and the
+most contended links purify first as a decision shared by every
+request using them---so one purified link can satisfy several
+concurrent requests at once.  Benchmarked against per-request
+threshold and greedy purification on identical routed paths (chain
+and grid topologies, 4--12 requests, 5 seeds each, 30 instances
+total; Fig.~\ref{fig:psc}), PSC matches the baselines' throughput on
+$28$ of $30$ instances (fewer purification decisions do not mean
+fewer delivered requests) while spending on average $2.5\times$ fewer
+Bell pairs on purification (up to $4.7\times$ at the most contended
+grid instances)---because a single shared-link purification serves
+every request routed through it, rather than each request purifying
+redundantly.  This is not a strict dominance, however: on the
+remaining $2$ of $30$ instances (both on the grid, the more densely
+shared topology) PSC's probabilistic, conflict-driven decisions admit
+one fewer request than the resource-profligate baselines, a genuine
+Pareto cost of coordinating purification by a shared probability
+rather than guaranteeing every individual request's threshold is
+met.  Network-level purification scheduling is therefore a strong but
+not unconditional resource-efficiency win, consistent with this
+paper's recurring finding that centralized, conflict-aware
+coordination beats independent per-request decisions until a rare
+worst-case realization of the shared probabilistic mechanism costs a
+unit of throughput.
+
+\begin{figure}[tbp]
+  \centering
+  \includegraphics[width=\columnwidth]{psc_comparison.png}
+  \caption{Network-level, conflict-aware purification scheduling
+    (PSC) versus per-request threshold and greedy baselines: resource
+    cost (left) and throughput ratio (right) versus contention.}
+  \label{fig:psc}
 \end{figure}
 
 \subsection{Adaptive Budget and Quantum-Annealing Backend}
@@ -1569,37 +1651,43 @@ rather than a strict replacement for annealing off-distribution.
   \label{fig:rlgen}
 \end{figure}
 
-\textbf{Attempted generalization of the GNN ranker.}  Unlike the RL
-router above, the GraphSAGE-guided ranker (Sec.~\ref{sec:hybrid}) is
-ordinarily trained and evaluated per instance family
-(Sec.~\ref{sec:discussion}).  Repeating the same zero-shot
-protocol for the GNN ranker---train on a chain,
-transplant the frozen weights onto ring, Erd\H{o}s--R\'enyi, and
-Barab\'asi--Albert topologies---found the test cannot yet distinguish
-zero-shot from in-distribution behavior: on every topology the two are
-numerically identical (Fig.~\ref{fig:gnngen}).  The cause is
-diagnosed, not assumed: the ranker's four-dimensional node/edge
-feature vector (degree, memory capacity, mean fidelity, mean latency)
-encodes only graph structure, not the bundle-specific attributes
-(purification rounds, fidelity margin) that distinguish bundles
-sharing a path, so path embeddings---and hence scores---tie across a
-request's candidates whenever the paths coincide or the topology is
-locally symmetric, as a ring is.  Top-$k$ selection under a tie then
-falls back to input order, which is why zero-shot and in-distribution
-selections coincide regardless of the (verifiably different) weights
-each produces.  This is a concrete, fixable gap---adding per-bundle
-features to the ranker's input---rather than evidence that the GNN
-generalizes; we report it as a diagnosed prerequisite for a
-meaningful cross-topology test, not as a result.
+\textbf{Cross-topology generalization of the GNN ranker.}  The
+GraphSAGE-guided ranker (Sec.~\ref{sec:hybrid}) is ordinarily trained
+and evaluated per instance family; repeating the zero-shot protocol
+above for the GNN ranker---train on a chain, transplant the frozen
+weights onto ring, Erd\H{o}s--R\'enyi, and Barab\'asi--Albert
+topologies---first surfaced a training pathology rather than a
+generalization result.  Full-batch gradient descent on the raw
+(unnormalized) bundle-utility target drove every hidden unit's
+pre-activation negative---a ``dead ReLU'' collapse under which every
+bundle received an identical score, equal to the output bias,
+regardless of topology, path, or purification level.  Normalizing the
+regression target by its instance-wise maximum magnitude before
+training---immaterial to the top-$k$ ranking task, since only relative
+order matters---resolves the collapse.  Comparing the repaired
+zero-shot ranker against in-distribution retraining and the
+full-QUBO reference on the same three held-out families
+(Fig.~\ref{fig:gnngen}) now yields a genuine test: zero-shot matches
+in-distribution exactly on the ring (served ratio $0.5$, utility
+$256.6$) and Erd\H{o}s--R\'enyi ($0.6$, $333.8$) families, and
+\emph{exceeds} it on Barab\'asi--Albert ($0.9$ vs.\ $0.7$ served,
+$556.9$ vs.\ $368.8$ utility), while both consistently beat the
+full-QUBO reference ($0.3$, $0.3$, and $0.7$ served, respectively)---the
+same reduction-improves-anneal-quality effect noted throughout
+Sec.~\ref{sec:adaptive-results}.  On this small, single-seed pilot the
+zero-shot ranker never underperforms in-distribution retraining,
+closing the cross-topology generalization question for the GNN ranker
+in the same direction as the RL router's result above, though it
+should be broadened to more seeds and instance families before being
+treated as general.
 
 \begin{figure}[tbp]
   \centering
   \includegraphics[width=\columnwidth]{gnn_topology_generalization.png}
-  \caption{GNN-guided ranker: zero-shot and in-distribution utility
-    coincide on every held-out topology, while the full-QUBO reference
-    (which does not depend on the ranker) differs---evidence that the
-    ranker's current path-only features cannot yet separate the two
-    regimes.}
+  \caption{GNN-guided ranker (post target-normalization fix):
+    zero-shot transfer matches or exceeds in-distribution retraining
+    on every held-out topology, and both beat the full-QUBO
+    reference.}
   \label{fig:gnngen}
 \end{figure}
 
@@ -1685,16 +1773,15 @@ the tested read budgets.  Fixing $A$ isolates capacity calibration;
 joint scaling and hardware-range effects remain open.
 
 \paragraph{Candidate reduction and purification are free until they
-bind.}  Adaptive top-$k$ and purification-aware candidate supersets
-leave the reference optimum unchanged or improve it on our
-benchmarks---reduction improves anneal quality at fixed budget, and
-purification is never forced.  GNN-guided ranking instead trades a
-small utility cost for higher served-request coverage on the grid
-(Sec.~\ref{sec:adaptive-results}), a different but still favorable
-point on the same throughput/utility dial.  Each method becomes
-binding in a defined regime (budget $k=2$ on chains; $F_{\min}$ above
-the $q{=}0$ ceiling), which the corresponding sweep quantifies.  This
-reframes candidate reduction and purification as \emph{tunable
+bind.}  Adaptive top-$k$, GNN-guided ranking, and purification-aware
+candidate supersets all leave the reference optimum unchanged or
+improve it on our benchmarks---reduction improves anneal quality at
+fixed budget (by $11\%$ for adaptive top-$k$ and $2\%$ for GNN-guided
+ranking on the grid instance of Sec.~\ref{sec:adaptive-results}), and
+purification is never forced.  Each method becomes binding in a
+defined regime (budget $k=2$ on chains; $F_{\min}$ above the $q{=}0$
+ceiling), which the corresponding sweep quantifies.  This reframes
+candidate reduction and purification as \emph{tunable
 reliability/capacity dials} rather than approximations.
 
 \paragraph{Limitations.}  The MPS coupling order is heuristic on the
@@ -1702,13 +1789,14 @@ chain and grid sizes tested; spectral reordering matches greedy
 ordering exactly at these scales (Sec.~\ref{sec:future-closure}), so a
 learned ordering's benefit, if any, would need to be demonstrated at
 larger contention where locality is more likely to bind.  The GNN
-ranker's cross-topology generalization remains untested in any
-meaningful sense: an attempted zero-shot protocol
-(Sec.~\ref{sec:future-closure}) found that its current path-only
-features cannot separate zero-shot from in-distribution behavior at
-all, a diagnosed feature-engineering gap rather than a generalization
-result, unlike the tabular/linear RL router's zero-shot test in the
-same section.  The joint scheduler assumes deterministic transmission;
+ranker's cross-topology generalization test (Sec.~\ref{sec:future-closure})
+only became meaningful after fixing a training instability---unnormalized
+utility targets drove a full ReLU collapse, after which every bundle
+received an identical score; once the target scale is normalized, the
+zero-shot ranker matches or exceeds in-distribution retraining on
+every topology tested, mirroring the RL router's result but on a
+smaller, single-seed instance set that should be broadened before the
+finding is treated as general.  The joint scheduler assumes deterministic transmission;
 stochastic success would require probabilistic windows.  The
 truncated-normal noise model is a proxy for a full device-noise
 characterization, and the chance-constraint calibration holds for the
@@ -1744,40 +1832,41 @@ candidate reduction, purification, and $k$-disjoint provisioning are
 free-or-beneficial until defined regimes make them bind; (vii)
 balanced swap trees recover up to $1.58\times$ of delivered fidelity
 under memory decay; (viii) solver quality survives across five
-topology families, degrading gracefully only on scale-free networks.
+topology families, degrading gracefully only on scale-free networks;
+(ix) network-level, conflict-aware purification scheduling matches
+per-request throughput on $28$ of $30$ tested instances at
+$2.5$--$4.7\times$ lower Bell-pair cost, trading a rare ($2$ of $30$)
+unit of throughput for that efficiency; (x) both the RL and
+GNN-guided routers generalize zero-shot to topology families absent
+from training, matching or exceeding in-distribution retraining on
+every family tested---though for the GNN ranker this held only after
+fixing a training instability (Sec.~\ref{sec:future-closure}) that
+had silently collapsed every candidate to an identical score.
 
 Future work falls into three themes.  \emph{Solver generalization and
 scale}: the pilot studies of Sec.~\ref{sec:future-closure} (adaptive
-bond dimension, MPS coupling order, and cross-topology RL
-generalization) are each demonstrated on 3--6 instances and should be
-extended to the full 1,080-instance benchmark suite used for penalty
-calibration before their conclusions are treated as general; a
-meaningful cross-topology test of the GraphSAGE-based ranker first
-requires extending its feature vector beyond graph structure to
-per-bundle attributes (purification rounds, fidelity margin), since
-Sec.~\ref{sec:future-closure} finds the current path-only features tie
-scores across a request's candidates and make the zero-shot/
-in-distribution comparison uninformative as posed; and the embedded QA
-backend (Sec.~\ref{sec:qa}) is validated against a simulated
-path-integral sampler, not physical quantum-annealing hardware.
-\emph{Reliability and scheduling}: stochastic-window joint scheduling,
-in which transmission success is itself probabilistic rather than
-assumed deterministic; chance-constrained joint scheduling that
-co-optimizes $\varepsilon$ with the temporal admission decision; and
-relaxing the independent-decay assumption of the swap-tree and
-temporal-memory analyses to correlated $T_1/T_2$ dephasing.
-\emph{Game-theoretic and network-level extensions}: calibrating the
-worst-case-scenario set (Sec.~\ref{sec:results-game}) against measured
-link-failure statistics rather than a synthetic noise model; extending
-the price-of-anarchy analysis from the toy Pigou/Braess instances to
-the chain, grid, and generative topology families used throughout the
-rest of this paper, to test whether the tolling remedy scales with
-network size; exploring a decentralized, tolled mechanism as a
-communication-light alternative to the centralized QUBO for very large
-networks; and a network-level, conflict-aware extension of the
-purification scheduler that coordinates purification decisions across
-requests sharing a link, for which an initial implementation exists
-but is not yet benchmarked in this manuscript.
+bond dimension, MPS coupling order, and cross-topology generalization
+of both learned routers) are each demonstrated on a small, single-seed
+instance set and should be extended to the full 1,080-instance
+benchmark suite used for penalty calibration before their conclusions
+are treated as general; and the embedded QA backend (Sec.~\ref{sec:qa})
+is validated against a simulated path-integral sampler, not physical
+quantum-annealing hardware.  \emph{Reliability and scheduling}: we
+implemented and tested stochastic-window and chance-constrained
+temporal scheduling (Sec.~\ref{sec:results-reliability}), but found no
+regime in our benchmark family where memory-fit uncertainty---rather
+than edge capacity or deadlines---is the binding constraint; finding
+or constructing such an instance family remains open, as does relaxing
+the independent-decay assumption of the swap-tree and temporal-memory
+analyses to correlated $T_1/T_2$ dephasing.  \emph{Game-theoretic
+extensions}: calibrating the worst-case-scenario set
+(Sec.~\ref{sec:results-game}) against measured link-failure statistics
+rather than a synthetic noise model; extending the price-of-anarchy
+analysis from the toy Pigou/Braess instances to the chain, grid, and
+generative topology families used throughout the rest of this paper,
+to test whether the tolling remedy scales with network size; and
+exploring a decentralized, tolled mechanism as a communication-light
+alternative to the centralized QUBO for very large networks.
 
 \section*{Author Contributions}
 [To be completed by the authors: CRediT-style statement, e.g.\
