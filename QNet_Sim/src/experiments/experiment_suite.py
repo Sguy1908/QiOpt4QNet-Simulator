@@ -1231,6 +1231,72 @@ def run_chance_purification_experiments():
     _write_rows(rows, "chance_purification_tradeoff.csv")
 
 
+def run_psc_experiments():
+    """Future work: benchmark the network-level, conflict-aware
+    purification scheduler (PSC) against the per-request threshold and
+    greedy baselines it was designed to beat, across chain and grid
+    topologies at increasing contention."""
+    import random as _random
+    from optimization.conflict_purification_scheduler import run_psc_comparison
+
+    def make_pairs(topo, n_pairs, seed, min_fid_range=(0.7, 0.92)):
+        rng = _random.Random(seed)
+        pairs = []
+        for _ in range(n_pairs):
+            src, dst = rng.sample(topo["nodes"], 2)
+            pairs.append((src, dst, rng.uniform(10, 100), rng.uniform(*min_fid_range)))
+        return pairs
+
+    configs = [
+        ("chain_8", lambda: generate_chain_topology(n_nodes=8, edge_capacity=6,
+                                                     memory_capacity=10), [4, 8, 12]),
+        ("grid_4x4", lambda: generate_grid_topology(rows=4, cols=4, edge_capacity=6,
+                                                     memory_capacity=10), [4, 8, 12]),
+    ]
+    rows = []
+    for name, topo_fn, n_pairs_list in configs:
+        for n_pairs in n_pairs_list:
+            for seed in [11, 12, 13, 14, 15]:
+                topo = topo_fn()
+                pairs = make_pairs(topo, n_pairs, seed=seed)
+                res = run_psc_comparison(topo, pairs, bell_pairs_per_purification=2, seed=42)
+                for label, r in res.items():
+                    rows.append({
+                        "topology": name, "n_pairs": n_pairs, "seed": seed,
+                        "strategy": label, "n_requests": r["n_requests"],
+                        "throughput": r["throughput"],
+                        "throughput_ratio": r["throughput"] / max(r["n_requests"], 1),
+                        "purification_cost": r["purification_cost"],
+                        "resource_consumption_ratio": (
+                            r["resource_consumption_ratio"]
+                            if r["resource_consumption_ratio"] != float("inf") else None),
+                    })
+    _write_rows(rows, "psc_comparison.csv")
+
+
+def run_stochastic_joint_experiments():
+    """Future work: stochastic-window joint scheduling and chance-constrained
+    joint scheduling that co-optimizes epsilon with the temporal admission
+    decision, at both the default (edge-capacity-dominated) benchmark
+    topology and a memory-tightened variant."""
+    from optimization.joint_scheduler import run_stochastic_chance_joint_study
+
+    rows = []
+    for label, mem_cap in [("edge_dominated", 12), ("memory_tightened", 4)]:
+        topo_fn = lambda mc=mem_cap: generate_chain_topology(
+            n_nodes=10, edge_capacity=8, memory_capacity=mc, raw_fidelity=0.85)
+        res = run_stochastic_chance_joint_study(
+            topo_fn, n_slots=12, mean_rate=1.4, tau_mem=5.0,
+            deadline_horizon=20.0, hold_time_std_frac=0.5,
+            eps_choices=[0.01, 0.1, 0.2, 0.4],
+            eps_risk_weight_list=[0.2, 1.0, 3.0],
+            n_instances=3, mc_samples=60, seed=42)
+        for r in res["rows"]:
+            r["regime_family"] = label
+            rows.append(r)
+    _write_rows(rows, "stochastic_joint_scheduling.csv")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("  Paper experiment sweep")
@@ -1325,6 +1391,12 @@ if __name__ == "__main__":
 
     print("\n30. Chance-constrained + purification (future work): joint optimization...")
     run_chance_purification_experiments()
+
+    print("\n31. PSC (future work): conflict-aware purification vs threshold/greedy...")
+    run_psc_experiments()
+
+    print("\n32. Stochastic-window + chance-constrained joint scheduling (future work)...")
+    run_stochastic_joint_experiments()
 
     print(f"\nAll results in {OUT}/")
 
