@@ -730,40 +730,52 @@ def fig_gnn_generalization():
 def fig_psc_comparison():
     """Future work: network-level, conflict-aware purification scheduling
     (PSC) versus the per-request threshold and greedy baselines it was
-    designed to beat."""
+    designed to beat, across chain, grid, and five generative topology
+    families (the same robustness standard as Sec. topology-results)."""
     if not HAS_MPL:
         return
     rows = _load(os.path.join(DATA, "psc_comparison.csv"))
-    strategies = ["threshold", "greedy", "psc"]
-    colors = {"threshold": "#c44e52", "greedy": "#dd8452", "psc": "#4c72b0"}
-    n_pairs_vals = sorted(set(int(r["n_pairs"]) for r in rows))
+    topos = ["chain_8", "grid_4x4", "ring_12", "random_geometric_12",
+             "erdos_renyi_12", "watts_strogatz_12", "barabasi_albert_12"]
+    topos = [t for t in topos if any(r["topology"] == t for r in rows)]
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.6))
-    x = range(len(n_pairs_vals))
-    width = 0.25
-    for i, strat in enumerate(strategies):
-        cost_by_n = []
-        thr_by_n = []
-        for n in n_pairs_vals:
-            sub = [r for r in rows if r["strategy"] == strat and int(r["n_pairs"]) == n]
-            cost_by_n.append(sum(float(r["purification_cost"]) for r in sub) / len(sub))
-            thr_by_n.append(sum(float(r["throughput_ratio"]) for r in sub) / len(sub))
-        ax1.bar([xi + (i - 1) * width for xi in x], cost_by_n, width,
-                label=strat, color=colors[strat], alpha=0.85)
-        ax2.bar([xi + (i - 1) * width for xi in x], thr_by_n, width,
-                label=strat, color=colors[strat], alpha=0.85)
+    cells = defaultdict(dict)
+    for r in rows:
+        key = (r["topology"], r["n_pairs"], r["seed"])
+        cells[key][r["strategy"]] = r
 
-    for ax, ylabel, title in [
-        (ax1, "Mean Bell pairs spent on purification",
-         "Resource cost (lower is better)"),
-        (ax2, "Mean throughput ratio", "Throughput (ties are expected)"),
-    ]:
+    ratio_by_topo = defaultdict(list)
+    loss_by_topo = defaultdict(lambda: [0, 0])
+    for (topo, n_pairs, seed), d in cells.items():
+        t_psc = float(d["psc"]["throughput"])
+        t_best = max(float(d["threshold"]["throughput"]), float(d["greedy"]["throughput"]))
+        c_psc = float(d["psc"]["purification_cost"])
+        c_best = min(float(d["threshold"]["purification_cost"]),
+                     float(d["greedy"]["purification_cost"]))
+        if c_psc > 0:
+            ratio_by_topo[topo].append(c_best / c_psc)
+        loss_by_topo[topo][1] += 1
+        if t_psc < t_best:
+            loss_by_topo[topo][0] += 1
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 4.8))
+    x = range(len(topos))
+    mean_ratio = [sum(ratio_by_topo[t]) / len(ratio_by_topo[t]) for t in topos]
+    loss_rate = [loss_by_topo[t][0] / loss_by_topo[t][1] for t in topos]
+
+    ax1.bar(x, mean_ratio, color="#4c72b0", alpha=0.85)
+    ax1.axhline(1.0, color="gray", linestyle=":", label="no advantage")
+    ax1.set_ylabel("Mean cost-reduction ratio (baseline / PSC)")
+    ax1.set_title("Resource-efficiency gain by topology family")
+    ax1.legend(fontsize=8)
+
+    ax2.bar(x, loss_rate, color="#c44e52", alpha=0.85)
+    ax2.set_ylabel("Fraction of instances losing 1 request vs. best baseline")
+    ax2.set_title("Throughput cost by topology family")
+
+    for ax in (ax1, ax2):
         ax.set_xticks(list(x))
-        ax.set_xticklabels([str(n) for n in n_pairs_vals])
-        ax.set_xlabel("Requests per instance")
-        ax.set_ylabel(ylabel)
-        ax.set_title(title)
-        ax.legend(fontsize=8)
+        ax.set_xticklabels(topos, rotation=20, ha="right", fontsize=8)
         ax.grid(True, alpha=0.3, axis="y")
 
     plt.tight_layout()

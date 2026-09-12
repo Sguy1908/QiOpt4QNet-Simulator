@@ -54,7 +54,14 @@ SLA-violation rate in the deterministic rule while holding empirical
 violation at or below budget; local-repair \emph{recourse} recovers
 all failed requests at up to $1065\times$ speedup over replanning; and
 \emph{purification}, added as a first-class variable, is cost-free
-until fidelity requirements exceed raw-link fidelity.  The full
+until fidelity requirements exceed raw-link fidelity, with a
+network-level, conflict-aware extension matching per-request
+throughput on $85\%$ of instances across seven topology families at
+$2.06\times$ (up to $4.7\times$) lower Bell-pair cost.  Both a
+reinforcement-learning and a graph-neural-network-guided router
+generalize zero-shot to topologies absent from training---the latter
+only after we diagnosed and fixed a training instability that had
+silently collapsed its candidate scores to a constant.  The full
 stack---temporal-memory scheduling, learned candidate reduction,
 multi-objective and $k$-disjoint-path analysis, price-of-anarchy and
 worst-case-scenario baselines, and literature-calibrated hardware
@@ -66,7 +73,8 @@ memory-agnostic baseline over-admits.
 \section{Introduction}
 \label{sec:intro}
 
-Quantum networks distribute entanglement between distant nodes, the
+Quantum networks distribute
+entanglement~\cite{horodecki2009quantum} between distant nodes, the
 resource behind quantum key distribution
 (QKD)~\cite{ekert1991quantum,gisin2002quantum,scarani2009security,
 pirandola2020advances}, distributed quantum
@@ -75,9 +83,10 @@ computing~\cite{kimble2008quantum,wehner2018quantum,simon2017towards}.
 The central resource-allocation problem is: given concurrent
 entanglement requests between node pairs, select for each request a
 path and a purification schedule---collectively a \emph{bundle}---that
-maximizes end-to-end fidelity while respecting edge (Bell-pair) and
-node (memory-qubit) capacities \cite{briegel1998quantum,
-dur1999entanglement,sangouard2011quantum,azuma2023quantum}.
+maximizes end-to-end fidelity~\cite{jozsa1994fidelity} while
+respecting edge (Bell-pair) and node (memory-qubit) capacities
+\cite{briegel1998quantum,dur1999entanglement,sangouard2011quantum,
+azuma2023quantum}.
 
 This is a constrained combinatorial optimization problem with
 structure unique to quantum systems: entanglement generation and
@@ -138,8 +147,9 @@ formulation and four extensions toward physical realism:
     reduce--solve--repair, and GraphSAGE-guided candidate reduction
     (Sec.~\ref{sec:adaptive-qubo}); and purification as a first-class
     variable, extended to a network-level, conflict-aware scheduler
-    that matches per-request throughput at $2.5\times$ lower Bell-pair
-    cost (Sec.~\ref{sec:purification}).
+    that matches per-request throughput across seven topology families
+    at $2.06\times$ lower Bell-pair cost on average
+    (Sec.~\ref{sec:purification}).
   \item \textbf{Analysis extensions.}  Multi-objective Pareto and
     $\epsilon$-constraint frontiers, $k$-disjoint-path provisioning,
     swap-tree ordering under memory decay, generative topology
@@ -179,8 +189,16 @@ entanglement percolation in complex networks; Schoute et
 al.~\cite{schoute2016shortcuts} and Kozlowski et
 al.~\cite{kozlowski2020designing} address greedy routing and protocol
 stacks for dynamic requests; and Van Meter~\cite{vanmeter2014quantum}
-provides a comprehensive textbook treatment.  Network simulators such
-as NetSquid~\cite{coopmans2021netsquid} and
+provides a comprehensive textbook treatment.  Closest to our
+network-level purification study (Sec.~\ref{sec:results-psc}), Xiao et
+al.~\cite{xiao2024purification} introduce \emph{Purification
+Scheduling Control} (PSC), which jointly optimizes purification and
+resource allocation across concurrent requests by conflict avoidance
+rather than deciding purification per link in isolation; we build a
+simplified, probabilistic conflict-metric scheduler in that spirit and
+benchmark it against per-request baselines rather than reproducing
+their optimization exactly.  Network simulators such as
+NetSquid~\cite{coopmans2021netsquid} and
 SeQUeNCe~\cite{wu2021sequence} provide physically faithful, usually
 instance-by-instance, evaluation.  Our work differs in treating the
 entire request-allocation problem as a single binary optimization over
@@ -1306,41 +1324,50 @@ exactly.
 \label{sec:results-psc}
 
 Sec.~\ref{sec:results-purification} treats purification per request,
-independent of what other requests sharing the same link need.  The
-conflict-aware purification scheduler (PSC) instead treats
-purification as a network resource: a per-link conflict metric
+independent of what other requests sharing the same link need.  In
+the spirit of Purification Scheduling Control~\cite{xiao2024purification}
+(Sec.~\ref{sec:related-net}), our conflict-aware purification
+scheduler (PSC) instead treats purification as a network resource: a
+per-link conflict metric
 aggregates purification need across every request still pending on
 that link, scaled by the link's remaining Bell-pair budget, and the
 most contended links purify first as a decision shared by every
 request using them---so one purified link can satisfy several
 concurrent requests at once.  Benchmarked against per-request
-threshold and greedy purification on identical routed paths (chain
-and grid topologies, 4--12 requests, 5 seeds each, 30 instances
-total; Fig.~\ref{fig:psc}), PSC matches the baselines' throughput on
-$28$ of $30$ instances (fewer purification decisions do not mean
-fewer delivered requests) while spending on average $2.5\times$ fewer
-Bell pairs on purification (up to $4.7\times$ at the most contended
-grid instances)---because a single shared-link purification serves
-every request routed through it, rather than each request purifying
-redundantly.  This is not a strict dominance, however: on the
-remaining $2$ of $30$ instances (both on the grid, the more densely
-shared topology) PSC's probabilistic, conflict-driven decisions admit
-one fewer request than the resource-profligate baselines, a genuine
-Pareto cost of coordinating purification by a shared probability
-rather than guaranteeing every individual request's threshold is
-met.  Network-level purification scheduling is therefore a strong but
-not unconditional resource-efficiency win, consistent with this
-paper's recurring finding that centralized, conflict-aware
-coordination beats independent per-request decisions until a rare
-worst-case realization of the shared probabilistic mechanism costs a
-unit of throughput.
+threshold and greedy purification on identical routed paths across
+chain, grid, and the same five generative topology families used in
+Sec.~\ref{sec:topology-results} (4--12 requests, 5 seeds each, 105
+instances total; Fig.~\ref{fig:psc}), PSC matches the baselines'
+throughput on $89$ of $105$ instances (fewer purification decisions
+do not mean fewer delivered requests) while spending, on average
+across all seven families, $2.06\times$ fewer Bell pairs on
+purification (up to $4.7\times$ on the most contended grid
+instances)---because a single shared-link purification
+serves every request routed through it, rather than each request
+purifying redundantly.  This is not a strict dominance, however: on
+the remaining $16$ of $105$ instances PSC's probabilistic,
+conflict-driven decisions admit one fewer request than the
+resource-profligate baselines, and this cost is markedly uneven
+across topology shape (Fig.~\ref{fig:psc}, right): $0\%$ of chain
+instances lose a request versus $27\%$ of Watts--Strogatz
+small-world instances, echoing this paper's separate finding
+(Sec.~\ref{sec:topology-results}) that small-world and scale-free
+structure is hardest on the solver stack generally.  Network-level
+purification scheduling is therefore a strong but not unconditional
+resource-efficiency win---real on every topology tested (the
+cost-reduction ratio never drops below $1.0\times$), but its
+reliability cost is topology-dependent and should be weighed against
+that specific network's shape rather than assumed from a chain or
+grid pilot alone.
 
 \begin{figure}[tbp]
   \centering
   \includegraphics[width=\columnwidth]{psc_comparison.png}
   \caption{Network-level, conflict-aware purification scheduling
-    (PSC) versus per-request threshold and greedy baselines: resource
-    cost (left) and throughput ratio (right) versus contention.}
+    (PSC) versus per-request threshold and greedy baselines, by
+    topology family: mean Bell-pair cost-reduction ratio (left) and
+    fraction of instances where PSC admits one fewer request than the
+    best baseline (right).}
   \label{fig:psc}
 \end{figure}
 
@@ -1354,12 +1381,19 @@ is a free control knob until it discards the optimal bundle; the
 consistent $\sim\!13\%$ gap versus the full-candidate reference is a
 fixed-read annealing artifact that candidate reduction does not
 worsen.  Table~\ref{tab:qa} reports the embedded quantum-annealing
-backend.  The embedded QA backend (832--896 hardware qubits, zero
-chain breaks) beats both classical samplers at every size ($5.11$--
-$11.45$ vs.\ $0.68$ for SA, which stagnates at the small default read
-budget, and $2.86$--$5.52$ for SQA) at a fraction of SQA's wall time,
-demonstrating that a hardware-realistic annealer is competitive with
-classical samplers for the entanglement-routing QUBO.
+backend---a classical simulation of hardware embedding and sampling
+(minor-embedded onto a Chimera-like lattice, sampled with OpenJij's
+path-integral annealer; Sec.~\ref{sec:qa}), not a run on physical
+annealing hardware.  The embedded QA backend (832--896 simulated
+hardware qubits, zero chain breaks) beats both classical samplers at
+every size ($5.11$--$11.45$ vs.\ $0.68$ for SA, which stagnates at the
+small default read budget, and $2.86$--$5.52$ for SQA) at a fraction
+of SQA's wall time,
+demonstrating that a hardware-embedding-realistic annealing model is
+competitive with classical samplers for the entanglement-routing
+QUBO---a claim about the simulated embedding and sampling procedure,
+which physical quantum-annealing hardware would still need to confirm
+(Sec.~\ref{sec:conclusion}).
 
 \begin{table}[tbp]
   \centering
@@ -1796,9 +1830,14 @@ received an identical score; once the target scale is normalized, the
 zero-shot ranker matches or exceeds in-distribution retraining on
 every topology tested, mirroring the RL router's result but on a
 smaller, single-seed instance set that should be broadened before the
-finding is treated as general.  The joint scheduler assumes deterministic transmission;
-stochastic success would require probabilistic windows.  The
-truncated-normal noise model is a proxy for a full device-noise
+finding is treated as general.  We implemented and tested a
+stochastic-window variant of the joint scheduler
+(Sec.~\ref{sec:results-reliability}), but on our benchmark family
+admission is gated by edge capacity and deadlines rather than the
+memory-timing risk the mechanism targets, so it never bound in the
+regimes tested; whether it binds under a memory-dominated instance
+family remains open.  The truncated-normal noise model is a proxy for
+a full device-noise
 characterization, and the chance-constraint calibration holds for the
 modeled noise only---hardware validation on measured parameters
 remains future work.  Our swap-tree analysis assumes independent T1/T2
@@ -1834,14 +1873,19 @@ balanced swap trees recover up to $1.58\times$ of delivered fidelity
 under memory decay; (viii) solver quality survives across five
 topology families, degrading gracefully only on scale-free networks;
 (ix) network-level, conflict-aware purification scheduling matches
-per-request throughput on $28$ of $30$ tested instances at
-$2.5$--$4.7\times$ lower Bell-pair cost, trading a rare ($2$ of $30$)
-unit of throughput for that efficiency; (x) both the RL and
-GNN-guided routers generalize zero-shot to topology families absent
-from training, matching or exceeding in-distribution retraining on
-every family tested---though for the GNN ranker this held only after
-fixing a training instability (Sec.~\ref{sec:future-closure}) that
-had silently collapsed every candidate to an identical score.
+per-request throughput on $89$ of $105$ instances across chain, grid,
+and five generative topology families at $2.06\times$ (up to
+$4.7\times$) lower Bell-pair cost, trading throughput for that
+efficiency at a rate that is itself topology-dependent ($0\%$ of
+chain instances vs.\ $27\%$ of Watts--Strogatz instances lose a
+request); (x) on a small, single-seed
+pilot, both the RL and GNN-guided routers generalize zero-shot to
+topology families absent from training, matching or exceeding
+in-distribution retraining on every family tested---though for the
+GNN ranker this held only after fixing a training instability
+(Sec.~\ref{sec:future-closure}) that had silently collapsed every
+candidate to an identical score, and both results should be broadened
+to more seeds before being treated as general.
 
 Future work falls into three themes.  \emph{Solver generalization and
 scale}: the pilot studies of Sec.~\ref{sec:future-closure} (adaptive
@@ -2328,6 +2372,12 @@ A.~Ortu, A.~Holz\"apfel, J.~Etesse, and M.~Afzelius,
 ``Storage of photonic time-bin qubits for up to 20\,ms in a
 rare-earth doped crystal,''
 \emph{npj Quantum Information}, vol.~8, p.~29, 2022.
+
+\bibitem{xiao2024purification}
+Z.~Xiao, J.~Li, K.~Xue, N.~Yu, R.~Li, Q.~Sun, and J.~Lu,
+``Purification scheduling control for throughput maximization in
+quantum networks,''
+\emph{Commun. Phys.}, vol.~7, p.~307, 2024.
 
 \end{thebibliography}
 
