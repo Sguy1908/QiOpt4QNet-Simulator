@@ -57,6 +57,20 @@ def _path_edges(path: Sequence[str]) -> List[Edge]:
     return [_edge_key(path[i], path[i + 1]) for i in range(len(path) - 1)]
 
 
+def _link_params(topology: dict, e: Edge) -> dict:
+    """Look up ``e``'s params regardless of storage order.
+
+    ``topologies.py``'s generators store ``link_params`` keyed by the raw
+    (generation-order) edge tuple, not the sorted ``_edge_key`` -- for most
+    edges the two coincide, but not for every edge of every generative
+    family (e.g. a ring's closing edge, or arbitrary-order edges from
+    Erdos-Renyi/Watts-Strogatz/Barabasi-Albert).  Every caller here works
+    with sorted keys, so try both orders before giving up.
+    """
+    params = topology["link_params"]
+    return params.get(e) or params.get((e[1], e[0])) or {}
+
+
 @dataclass
 class PSCRequest:
     request_id: str
@@ -76,7 +90,7 @@ def route_requests(topology: dict,
     G = nx.Graph()
     G.add_nodes_from(topology["nodes"])
     for (u, v) in topology["edges"]:
-        lp = topology["link_params"].get(_edge_key(u, v), {})
+        lp = _link_params(topology, _edge_key(u, v))
         G.add_edge(u, v, weight=lp.get("latency", 1.0))
 
     out = []
@@ -99,7 +113,7 @@ def _path_fidelity(topology: dict, path: Sequence[str], purified: Set[Edge]) -> 
     """
     fids = []
     for e in _path_edges(path):
-        raw = topology["link_params"][e]["raw_fidelity"]
+        raw = _link_params(topology, e)["raw_fidelity"]
         if e in purified and raw > 0.5:
             f = FidelityModel.purification_bbpssw(raw)
         else:
@@ -184,8 +198,12 @@ class ConflictAwarePurificationScheduler:
         self.bell_pairs_per_purification = bell_pairs_per_purification
         self.rng = random.Random(seed)
         self.max_iterations = max_iterations
+        # Keyed by the sorted _edge_key, matching every other lookup in this
+        # class (candidate_links, purification_need); topology["edge_capacities"]
+        # itself is keyed by generation-order tuples (see _link_params), which
+        # need not match the sorted order for every edge of every family.
         self.budgets: Dict[Edge, _LinkBudget] = {
-            e: _LinkBudget(capacity=cap, remaining=cap)
+            _edge_key(*e): _LinkBudget(capacity=cap, remaining=cap)
             for e, cap in topology["edge_capacities"].items()
         }
 
@@ -254,7 +272,7 @@ def threshold_baseline(topology: dict, requests: List[PSCRequest],
     "link-level purification can't provide an effective solution for
     concurrent requests" critique describes.
     """
-    remaining = {e: cap for e, cap in topology["edge_capacities"].items()}
+    remaining = {_edge_key(*e): cap for e, cap in topology["edge_capacities"].items()}
     purified_union: Set[Edge] = set()
     per_request = {}
     for r in requests:
@@ -294,7 +312,7 @@ def greedy_baseline(topology: dict, requests: List[PSCRequest],
     request actually needs it -- maximises fidelity margin at the cost of
     resources (the "Greedy" baseline in the PSC literature).
     """
-    remaining = {e: cap for e, cap in topology["edge_capacities"].items()}
+    remaining = {_edge_key(*e): cap for e, cap in topology["edge_capacities"].items()}
     per_request = {}
     for r in requests:
         purified: Set[Edge] = set()
