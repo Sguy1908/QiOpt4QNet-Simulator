@@ -1234,9 +1234,16 @@ def run_chance_purification_experiments():
 def run_psc_experiments():
     """Future work: benchmark the network-level, conflict-aware
     purification scheduler (PSC) against the per-request threshold and
-    greedy baselines it was designed to beat, across chain and grid
-    topologies at increasing contention."""
+    greedy baselines it was designed to beat, across chain, grid, and
+    the five generative topology families used for Sec. topology-results
+    (Extension 13) so PSC is checked against the same robustness
+    standard as the rest of the solver stack, not just two shapes."""
     import random as _random
+    from extensions.topologies import (
+        generate_ring_topology, generate_random_geometric_topology,
+        generate_erdos_renyi_topology, generate_watts_strogatz_topology,
+        generate_barabasi_albert_topology,
+    )
     from optimization.conflict_purification_scheduler import run_psc_comparison
 
     def make_pairs(topo, n_pairs, seed, min_fid_range=(0.7, 0.92)):
@@ -1252,6 +1259,16 @@ def run_psc_experiments():
                                                      memory_capacity=10), [4, 8, 12]),
         ("grid_4x4", lambda: generate_grid_topology(rows=4, cols=4, edge_capacity=6,
                                                      memory_capacity=10), [4, 8, 12]),
+        ("ring_12", lambda: generate_ring_topology(n_nodes=12, edge_capacity=6,
+                                                    memory_capacity=10), [4, 8, 12]),
+        ("random_geometric_12", lambda: generate_random_geometric_topology(
+            n_nodes=12, radius=0.35, edge_capacity=6, memory_capacity=10), [4, 8, 12]),
+        ("erdos_renyi_12", lambda: generate_erdos_renyi_topology(
+            n_nodes=12, p=0.22, edge_capacity=6, memory_capacity=10), [4, 8, 12]),
+        ("watts_strogatz_12", lambda: generate_watts_strogatz_topology(
+            n_nodes=12, edge_capacity=6, memory_capacity=10), [4, 8, 12]),
+        ("barabasi_albert_12", lambda: generate_barabasi_albert_topology(
+            n_nodes=12, edge_capacity=6, memory_capacity=10), [4, 8, 12]),
     ]
     rows = []
     for name, topo_fn, n_pairs_list in configs:
