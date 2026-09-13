@@ -648,6 +648,143 @@ def fig_rl_generalization():
     print(f"Saved {path}")
 
 
+def fig_chance_purification():
+    """Future work: joint chance-constrained and purification optimization.
+    Served ratio, utility, and mean purification rounds versus the
+    SLA-violation budget epsilon, for a purification-agnostic (q=0 only)
+    versus purification-aware (q up to 4) candidate set."""
+    if not HAS_MPL:
+        return
+    rows = _load(os.path.join(DATA, "chance_purification_tradeoff.csv"))
+    n_requests = 8
+    colors = {"agnostic": "#c44e52", "aware": "#4c72b0"}
+
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.2))
+    for regime, color in colors.items():
+        sub = sorted([r for r in rows if r["regime"] == regime],
+                    key=lambda r: -float(r["epsilon"]))
+        eps = [float(r["epsilon"]) for r in sub]
+        served_ratio = [float(r["served"]) / n_requests for r in sub]
+        utility = [float(r["utility"]) for r in sub]
+        mean_q = [float(r["mean_purif_rounds"]) for r in sub]
+        axes[0].plot(eps, served_ratio, marker="o", color=color, label=regime,
+                    linewidth=2)
+        axes[1].plot(eps, utility, marker="o", color=color, label=regime,
+                    linewidth=2)
+        axes[2].plot(eps, mean_q, marker="o", color=color, label=regime,
+                    linewidth=2)
+
+    for ax, ylabel, title in [
+        (axes[0], "Served ratio", "Coverage vs. reliability budget"),
+        (axes[1], "Aggregate utility", "Utility vs. reliability budget"),
+        (axes[2], "Mean purification rounds (selected)",
+         "Purification use vs. reliability budget"),
+    ]:
+        ax.set_xlabel(r"SLA-violation budget $\varepsilon$")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.invert_xaxis()
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    path = os.path.join(OUT, "chance_purification_tradeoff.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved {path}")
+
+
+def fig_gnn_generalization():
+    """Future work: cross-topology generalization of the GNN-guided ranker.
+    Compares zero-shot transfer against in-distribution retraining and the
+    full-QUBO reference on three held-out topology families."""
+    if not HAS_MPL:
+        return
+    rows = _load(os.path.join(DATA, "gnn_topology_generalization.csv"))
+    topos = [r["eval_topology"] for r in rows]
+    x = range(len(topos))
+    width = 0.25
+    series = [
+        ("GNN (zero-shot)", "gnn_zero_shot_utility", "#c44e52"),
+        ("GNN (in-distribution)", "gnn_in_distribution_utility", "#4c72b0"),
+        ("Full-QUBO reference", "full_qubo_utility", "#55a868"),
+    ]
+    fig, ax = plt.subplots(figsize=(9, 4.6))
+    for i, (label, key, color) in enumerate(series):
+        vals = [float(r[key]) for r in rows]
+        ax.bar([xi + (i - 1) * width for xi in x], vals, width, label=label,
+              color=color, alpha=0.85)
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(topos)
+    ax.set_ylabel("Aggregate utility")
+    ax.set_title("GNN ranker: zero-shot vs. in-distribution vs. full QUBO")
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3, axis="y")
+    plt.tight_layout()
+    path = os.path.join(OUT, "gnn_topology_generalization.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved {path}")
+
+
+def fig_psc_comparison():
+    """Future work: network-level, conflict-aware purification scheduling
+    (PSC) versus the per-request threshold and greedy baselines it was
+    designed to beat, across chain, grid, and five generative topology
+    families (the same robustness standard as Sec. topology-results)."""
+    if not HAS_MPL:
+        return
+    rows = _load(os.path.join(DATA, "psc_comparison.csv"))
+    topos = ["chain_8", "grid_4x4", "ring_12", "random_geometric_12",
+             "erdos_renyi_12", "watts_strogatz_12", "barabasi_albert_12"]
+    topos = [t for t in topos if any(r["topology"] == t for r in rows)]
+
+    cells = defaultdict(dict)
+    for r in rows:
+        key = (r["topology"], r["n_pairs"], r["seed"])
+        cells[key][r["strategy"]] = r
+
+    ratio_by_topo = defaultdict(list)
+    loss_by_topo = defaultdict(lambda: [0, 0])
+    for (topo, n_pairs, seed), d in cells.items():
+        t_psc = float(d["psc"]["throughput"])
+        t_best = max(float(d["threshold"]["throughput"]), float(d["greedy"]["throughput"]))
+        c_psc = float(d["psc"]["purification_cost"])
+        c_best = min(float(d["threshold"]["purification_cost"]),
+                     float(d["greedy"]["purification_cost"]))
+        if c_psc > 0:
+            ratio_by_topo[topo].append(c_best / c_psc)
+        loss_by_topo[topo][1] += 1
+        if t_psc < t_best:
+            loss_by_topo[topo][0] += 1
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 4.8))
+    x = range(len(topos))
+    mean_ratio = [sum(ratio_by_topo[t]) / len(ratio_by_topo[t]) for t in topos]
+    loss_rate = [loss_by_topo[t][0] / loss_by_topo[t][1] for t in topos]
+
+    ax1.bar(x, mean_ratio, color="#4c72b0", alpha=0.85)
+    ax1.axhline(1.0, color="gray", linestyle=":", label="no advantage")
+    ax1.set_ylabel("Mean cost-reduction ratio (baseline / PSC)")
+    ax1.set_title("Resource-efficiency gain by topology family")
+    ax1.legend(fontsize=8)
+
+    ax2.bar(x, loss_rate, color="#c44e52", alpha=0.85)
+    ax2.set_ylabel("Fraction of instances losing 1 request vs. best baseline")
+    ax2.set_title("Throughput cost by topology family")
+
+    for ax in (ax1, ax2):
+        ax.set_xticks(list(x))
+        ax.set_xticklabels(topos, rotation=20, ha="right", fontsize=8)
+        ax.grid(True, alpha=0.3, axis="y")
+
+    plt.tight_layout()
+    path = os.path.join(OUT, "psc_comparison.png")
+    plt.savefig(path, dpi=150)
+    plt.close()
+    print(f"Saved {path}")
+
+
 def fig_hardware_profiles():
     if not HAS_MPL:
         return
@@ -804,7 +941,7 @@ def fig_robust_routing():
     ax.plot(xs, loss, marker="s", color="#ff7f0e", label="Nominal loss (price of robustness)")
     ax.set_xlabel("Bottleneck failure probability")
     ax.set_ylabel("Utility (robust vs nominal)")
-    ax.set_title("Robustness gain grows with uncertainty")
+    ax.set_title("Robustness gain vs. failure probability")
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
@@ -1609,6 +1746,9 @@ if __name__ == "__main__":
     fig_adaptive_bond_dimension()
     fig_mps_ordering()
     fig_rl_generalization()
+    fig_chance_purification()
+    fig_gnn_generalization()
+    fig_psc_comparison()
     print("\nGenerating tables...")
     generate_tables()
     print(f"\nAll outputs in {OUT}/")

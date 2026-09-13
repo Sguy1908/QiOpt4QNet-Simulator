@@ -1098,6 +1098,222 @@ def run_chance_constrained_experiments():
     _write_rows(res["rows"], "chance_constrained.csv")
 
 
+def run_gnn_topology_generalization_experiments():
+    """Future work: cross-topology generalization of the GNN-guided ranker.
+
+    Trains one GraphSAGERanker on a chain topology, then zero-shot
+    transplants the frozen weights onto three topology families it never
+    trained on (ring, Erdos-Renyi, Barabasi-Albert), against a control that
+    retrains a fresh ranker in-distribution on each family and against the
+    full-QUBO reference.  Mirrors run_rl_generalization_experiments() for
+    the GNN ranker instead of the tabular/linear RL router."""
+    import copy
+    import random as _random
+    from collections import defaultdict as _defaultdict
+    from baselines.gnn_ranker import GraphSAGERanker, gnn_guided_topk
+    from optimization.qubo_optimizer import QUBOOptimizer
+    from optimization.openjij_solver import solve_sa
+    from optimization.adaptive_qubo import reference_solution
+    from extensions.topologies import (
+        generate_ring_topology, generate_erdos_renyi_topology,
+        generate_barabasi_albert_topology,
+    )
+
+    def make_instance(topo, seed=7, n_pairs=10):
+        rng = _random.Random(seed)
+        pairs = []
+        for _ in range(n_pairs):
+            src, dst = rng.sample(topo["nodes"], 2)
+            pairs.append((src, dst, rng.uniform(10, 100), rng.uniform(0.5, 0.8)))
+        return generate_benchmark_instance(topo, pairs, rng)
+
+    def decode(bundles, reduced, ec, mc, seed=42, num_reads=20):
+        opt = QUBOOptimizer(reduced, ec, mc)
+        bqm = opt.to_bqm(congestion_penalty=0.0, memory_congestion_penalty=0.0)
+        response = solve_sa(bqm, num_reads=num_reads, seed=seed)
+        selected = opt.decode_sample(response.first.sample, repair=True)
+        util = {(b["request_id"], b["bundle_id"]): b["utility"] for b in bundles}
+        return (sum(util.get(k, 0.0) for k in selected),
+                len(set(k[0] for k in selected)))
+
+    train_topo = generate_chain_topology(n_nodes=8, edge_capacity=6, memory_capacity=10)
+    train_bundles, train_ec, train_mc = make_instance(train_topo, seed=7)
+    train_ranker, _, _ = gnn_guided_topk(train_topo, train_bundles, k=2, seed=42)
+    trained_weights = [copy.deepcopy(train_ranker.W), copy.deepcopy(train_ranker.W1),
+                       copy.deepcopy(train_ranker.b1), copy.deepcopy(train_ranker.W2),
+                       copy.deepcopy(train_ranker.b2)]
+
+    eval_topos = {
+        "ring_8": generate_ring_topology(n_nodes=8, edge_capacity=6, memory_capacity=10),
+        "erdos_renyi_8": generate_erdos_renyi_topology(n_nodes=8, p=0.4,
+                                                       edge_capacity=6, memory_capacity=10, seed=1),
+        "barabasi_albert_8": generate_barabasi_albert_topology(n_nodes=8, m_links=2,
+                                                                edge_capacity=6, memory_capacity=10, seed=1),
+    }
+
+    rows = []
+    for name, topo in eval_topos.items():
+        bundles, ec, mc = make_instance(topo, seed=7)
+        by_req = _defaultdict(list)
+        for b in bundles:
+            by_req[b["request_id"]].append(b)
+        n_req = len(by_req)
+
+        ref = reference_solution(bundles, ec, mc, num_reads=20, seed=42)
+
+        zs_ranker = GraphSAGERanker(topo, seed=42)
+        zs_ranker.W, zs_ranker.W1, zs_ranker.b1, zs_ranker.W2, zs_ranker.b2 = \
+            [copy.deepcopy(w) for w in trained_weights]
+        scores = zs_ranker.predict_bundles(bundles)
+        reduced_zs = []
+        for rid, bs in by_req.items():
+            ranked = sorted(bs, key=lambda b: scores[(b["request_id"], b["bundle_id"])],
+                            reverse=True)
+            reduced_zs.extend(ranked[:2])
+        util_zs, served_zs = decode(bundles, reduced_zs, ec, mc)
+
+        _, reduced_id, _ = gnn_guided_topk(topo, bundles, k=2, seed=42)
+        util_id, served_id = decode(bundles, reduced_id, ec, mc)
+
+        rows.append({
+            "eval_topology": name,
+            "n_requests": n_req,
+            "gnn_zero_shot_served_ratio": served_zs / n_req,
+            "gnn_zero_shot_utility": util_zs,
+            "gnn_in_distribution_served_ratio": served_id / n_req,
+            "gnn_in_distribution_utility": util_id,
+            "full_qubo_served_ratio": ref["served"] / n_req,
+            "full_qubo_utility": ref["utility"],
+        })
+    _write_rows(rows, "gnn_topology_generalization.csv")
+
+
+def run_chance_purification_experiments():
+    """Future work: joint chance-constrained and purification optimization.
+
+    Sweeps the SLA-violation budget epsilon and compares a
+    purification-agnostic (q=0 only) against a purification-aware (q up to
+    4) candidate set under the chance-constrained filter, to find where
+    purification starts to bind as the reliability budget tightens."""
+    from optimization.chance_constrained import expand_instance, filter_policy, exact_solve
+    import random as _random
+
+    topo = generate_chain_topology(n_nodes=8, edge_capacity=6, memory_capacity=10)
+    ec, mc = topo["edge_capacities"], topo["memory_capacities"]
+    rng = _random.Random(11)
+    pairs = []
+    for _ in range(8):
+        src, dst = rng.sample(topo["nodes"], 2)
+        pairs.append((src, dst, rng.uniform(20.0, 80.0), rng.uniform(0.65, 0.85)))
+
+    sigma = 0.05
+    eps_list = [0.5, 0.3, 0.2, 0.1, 0.05, 0.01]
+    rows = []
+    for regime, q_values in [("agnostic", [0]), ("aware", [0, 1, 2, 3, 4])]:
+        bundles_all = expand_instance(topo, pairs, sigma, q_values=q_values)
+        for eps in eps_list:
+            feasible = filter_policy(bundles_all, "chance", eps=eps)
+            if not feasible:
+                rows.append({"regime": regime, "epsilon": eps, "n_candidates": 0,
+                             "served": 0, "utility": 0.0, "mean_purif_rounds": 0.0})
+                continue
+            sol = exact_solve(feasible, ec, mc, time_limit=30.0)
+            lookup = {(b["request_id"], b["bundle_id"]): b for b in feasible}
+            selected_bundles = [lookup[k] for k in sol["selected"]]
+            util = sum(b["utility"] for b in selected_bundles)
+            mean_q = (sum(b.get("purification_rounds", 0) for b in selected_bundles)
+                      / len(selected_bundles)) if selected_bundles else 0.0
+            rows.append({"regime": regime, "epsilon": eps,
+                         "n_candidates": len(feasible),
+                         "served": len(selected_bundles),
+                         "utility": util,
+                         "mean_purif_rounds": mean_q})
+    _write_rows(rows, "chance_purification_tradeoff.csv")
+
+
+def run_psc_experiments():
+    """Future work: benchmark the network-level, conflict-aware
+    purification scheduler (PSC) against the per-request threshold and
+    greedy baselines it was designed to beat, across chain, grid, and
+    the five generative topology families used for Sec. topology-results
+    (Extension 13) so PSC is checked against the same robustness
+    standard as the rest of the solver stack, not just two shapes."""
+    import random as _random
+    from extensions.topologies import (
+        generate_ring_topology, generate_random_geometric_topology,
+        generate_erdos_renyi_topology, generate_watts_strogatz_topology,
+        generate_barabasi_albert_topology,
+    )
+    from optimization.conflict_purification_scheduler import run_psc_comparison
+
+    def make_pairs(topo, n_pairs, seed, min_fid_range=(0.7, 0.92)):
+        rng = _random.Random(seed)
+        pairs = []
+        for _ in range(n_pairs):
+            src, dst = rng.sample(topo["nodes"], 2)
+            pairs.append((src, dst, rng.uniform(10, 100), rng.uniform(*min_fid_range)))
+        return pairs
+
+    configs = [
+        ("chain_8", lambda: generate_chain_topology(n_nodes=8, edge_capacity=6,
+                                                     memory_capacity=10), [4, 8, 12]),
+        ("grid_4x4", lambda: generate_grid_topology(rows=4, cols=4, edge_capacity=6,
+                                                     memory_capacity=10), [4, 8, 12]),
+        ("ring_12", lambda: generate_ring_topology(n_nodes=12, edge_capacity=6,
+                                                    memory_capacity=10), [4, 8, 12]),
+        ("random_geometric_12", lambda: generate_random_geometric_topology(
+            n_nodes=12, radius=0.35, edge_capacity=6, memory_capacity=10), [4, 8, 12]),
+        ("erdos_renyi_12", lambda: generate_erdos_renyi_topology(
+            n_nodes=12, p=0.22, edge_capacity=6, memory_capacity=10), [4, 8, 12]),
+        ("watts_strogatz_12", lambda: generate_watts_strogatz_topology(
+            n_nodes=12, edge_capacity=6, memory_capacity=10), [4, 8, 12]),
+        ("barabasi_albert_12", lambda: generate_barabasi_albert_topology(
+            n_nodes=12, edge_capacity=6, memory_capacity=10), [4, 8, 12]),
+    ]
+    rows = []
+    for name, topo_fn, n_pairs_list in configs:
+        for n_pairs in n_pairs_list:
+            for seed in [11, 12, 13, 14, 15]:
+                topo = topo_fn()
+                pairs = make_pairs(topo, n_pairs, seed=seed)
+                res = run_psc_comparison(topo, pairs, bell_pairs_per_purification=2, seed=42)
+                for label, r in res.items():
+                    rows.append({
+                        "topology": name, "n_pairs": n_pairs, "seed": seed,
+                        "strategy": label, "n_requests": r["n_requests"],
+                        "throughput": r["throughput"],
+                        "throughput_ratio": r["throughput"] / max(r["n_requests"], 1),
+                        "purification_cost": r["purification_cost"],
+                        "resource_consumption_ratio": (
+                            r["resource_consumption_ratio"]
+                            if r["resource_consumption_ratio"] != float("inf") else None),
+                    })
+    _write_rows(rows, "psc_comparison.csv")
+
+
+def run_stochastic_joint_experiments():
+    """Future work: stochastic-window joint scheduling and chance-constrained
+    joint scheduling that co-optimizes epsilon with the temporal admission
+    decision, at both the default (edge-capacity-dominated) benchmark
+    topology and a memory-tightened variant."""
+    from optimization.joint_scheduler import run_stochastic_chance_joint_study
+
+    rows = []
+    for label, mem_cap in [("edge_dominated", 12), ("memory_tightened", 4)]:
+        topo_fn = lambda mc=mem_cap: generate_chain_topology(
+            n_nodes=10, edge_capacity=8, memory_capacity=mc, raw_fidelity=0.85)
+        res = run_stochastic_chance_joint_study(
+            topo_fn, n_slots=12, mean_rate=1.4, tau_mem=5.0,
+            deadline_horizon=20.0, hold_time_std_frac=0.5,
+            eps_choices=[0.01, 0.1, 0.2, 0.4],
+            eps_risk_weight_list=[0.2, 1.0, 3.0],
+            n_instances=3, mc_samples=60, seed=42)
+        for r in res["rows"]:
+            r["regime_family"] = label
+            rows.append(r)
+    _write_rows(rows, "stochastic_joint_scheduling.csv")
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("  Paper experiment sweep")
@@ -1186,6 +1402,18 @@ if __name__ == "__main__":
 
     print("\n28. RL topology generalization (future work): zero-shot transfer...")
     run_rl_generalization_experiments()
+
+    print("\n29. GNN topology generalization (future work): zero-shot transfer...")
+    run_gnn_topology_generalization_experiments()
+
+    print("\n30. Chance-constrained + purification (future work): joint optimization...")
+    run_chance_purification_experiments()
+
+    print("\n31. PSC (future work): conflict-aware purification vs threshold/greedy...")
+    run_psc_experiments()
+
+    print("\n32. Stochastic-window + chance-constrained joint scheduling (future work)...")
+    run_stochastic_joint_experiments()
 
     print(f"\nAll results in {OUT}/")
 
