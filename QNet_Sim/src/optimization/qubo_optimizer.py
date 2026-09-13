@@ -160,21 +160,24 @@ class QUBOOptimizer:
                 conflicts,
                 label=f"request_{request_id}"
             )
-        edge_penalty = Placeholder("B")
+
+        self.edge_index={}
         for index, (edge,uses) in enumerate(self.edge_demands.items()):
+            self.edge_index[edge]=index
             hamiltonian += self._capacity_term(
                 f"edge_{index}",
                 uses,
                 self.edge_capacities[edge],
-                edge_penalty
+                Placeholder(f"B_{index}")
             )
-        memory_penalty = Placeholder("D")
+        self.memory_index={}
         for index, (node,uses) in enumerate(self.memory_demands.items()):
+            self.memory_index[node]=index
             hamiltonian += self._capacity_term(
                 f"memory_{index}",
                 uses,
                 self.memory_capacities[node],
-                memory_penalty
+                Placeholder(f"D_{index}")
             )
         congestion_penalty = Placeholder("C")
         for index, (edge,uses) in enumerate(self.edge_demands.items()):
@@ -313,18 +316,22 @@ class QUBOOptimizer:
                     d if memory_penalty is None else memory_penalty)
         return penalty, edge_penalty, memory_penalty
 
+    def _feed(self,penalty, edge_penalty, memory_penalty, congestion_penalty, memory_congestion_penalty):
+        feed={"A": penalty, "C": congestion_penalty, "E": memory_congestion_penalty}
+        for edge, index in self.edge_index.items():
+            feed[f"B_{index}"] = (edge_penalty[edge] if isinstance(edge_penalty, dict) else edge_penalty)
+        for node, index in self.memory_index.items():
+            feed[f"D_{index}"] = (memory_penalty[node] if isinstance(memory_penalty, dict) else memory_penalty)
+        return feed
+
     def to_qubo(self, penalty=None, edge_penalty=None, memory_penalty=None,
                 congestion_penalty=0.05, memory_congestion_penalty=0.05):
         penalty, edge_penalty, memory_penalty = self._resolve_penalties(
             penalty, edge_penalty, memory_penalty)
-        return self.model.to_qubo(feed_dict={
-            "A": penalty, "B": edge_penalty, "D": memory_penalty,
-            "C": congestion_penalty, "E": memory_congestion_penalty})
+        return self.model.to_qubo(feed_dict=self._feed(penalty, edge_penalty, memory_penalty, congestion_penalty, memory_congestion_penalty))
 
     def to_bqm(self, penalty=None, edge_penalty=None, memory_penalty=None,
                congestion_penalty=0.05, memory_congestion_penalty=0.05):
         penalty, edge_penalty, memory_penalty = self._resolve_penalties(
             penalty, edge_penalty, memory_penalty)
-        return self.model.to_bqm(feed_dict={
-            "A": penalty, "B": edge_penalty, "D": memory_penalty,
-            "C": congestion_penalty, "E": memory_congestion_penalty})
+        return self.model.to_bqm(feed_dict=self._feed(penalty, edge_penalty, memory_penalty, congestion_penalty, memory_congestion_penalty))

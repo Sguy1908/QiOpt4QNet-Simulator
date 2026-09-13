@@ -11,6 +11,7 @@ from optimization.proposed_calibrator import (
     coefficient_bound,
     possible_loads,
     proposed_global_coefficients,
+    proposed_resource_coefficients,
 )
 from optimization.qubo_optimizer import QUBOOptimizer
 
@@ -179,3 +180,104 @@ def test_unknown_strategy_rejected():
     opt = _optimizer([_bundle("b0", "r0", 1.0, 1, 1)])
     with pytest.raises(ValueError, match="strategy"):
         calibrated_coefficients(opt, "mystery")
+
+def test_scalar_penalty_broadcasts():
+    opt = _optimizer(
+        [
+            _bundle("b0", "r0", 5.0, 2, 3),
+            _bundle("b1", "r1", 9.0, 3, 3),
+        ]
+    )
+    scalar = opt.to_qubo(penalty=10.0, edge_penalty=7.0, memory_penalty=3.0)
+    mapped=opt.to_qubo(penalty=10.0, edge_penalty={e: 7.0 for e in opt.edge_demands}, memory_penalty={n: 3.0 for n in opt.memory_demands},)
+    assert scalar == mapped
+
+def test_per_resource_never_exceeds_global():
+    opt = _optimizer(
+        [
+            _bundle("b0", "r0", 5.0, 2, 3),
+            _bundle("b1", "r1", 9.0, 3, 3),
+            _bundle("b2", "r2", 3.0, 4, 4),
+        ],
+        edge_capacity=6,
+        memory_capacity=6,
+    )
+    conventional = conventional_coefficients(opt)
+    glob=proposed_global_coefficients(opt)
+    per=proposed_resource_coefficients(opt)
+    for value in per["B"].values():
+        assert value <= glob["B"] + 1e-12
+        assert value <= conventional["B"] + 1e-12
+    for value in per["D"].values():
+        assert value <= glob["D"] + 1e-12
+        assert value <= conventional["D"] + 1e-12
+
+def test_per_resource_preserves_ground_state():
+    import itertools
+    def _b(bid,rid,utility,ab,bc,mem):
+        return{
+            "bundle_id": bid,
+            "request_id": rid,
+            "path": ["A","B","C"],
+            "edge_demands": {("A","B"):ab,("B","C"):bc},
+            "memory_demands":{"B":mem},
+            "utility":utility,
+        }
+    bundles=[
+        _b("b0","r0",9.0,3,0,2),
+        _b("b1","r0",4.0,1,2,1),
+        _b("b2","r1",7.0,2,3,2),
+        _b("b3","r2",5.0,0,2,1),
+    ]
+    caps={("A", "B"): 4, ("B", "C"): 4}
+    mems={"B": 3}
+    opt=QUBOOptimizer(bundles,caps,mems)
+    coeffs = proposed_resource_coefficients(opt)
+
+    def energy(chosen):
+        util = sum(b["utility"] for b in chosen)
+        loads, mem = {}, {}
+        for b in chosen:
+            for e, d in b["edge_demands"].items():
+                loads[e] = loads.get(e, 0) + d
+            for n, d in b["memory_demands"].items():
+                mem[n] = mem.get(n, 0) + d
+        per_request = {}
+        for b in chosen:
+            per_request[b["request_id"]] = per_request.get(b["request_id"], 0)
+        h=-util
+        for count in per_request.values():
+            h+=coeffs["A"]*count*(count-1)/2.0
+        for e, load in loads.items():
+            over = load-caps[e]
+            if over>0:
+                h+=coeffs["B"][e]*over*over
+        for n, load in mem.items():
+            over = load-mems[n]
+            if over>0:
+                h+=coeffs["D"][n]*over*over
+        return h,util
+
+    def feasible(chosen):
+        seen = set()
+        loads,mem = {}, {}
+        for b in chosen:
+            if b["request_id"] in seen:
+                return False
+            seen.add(b["request_id"])
+            for e,d in b["edge_demands"].items():
+                loads[e] = loads.get(e,0)+d
+            for n,d in b["memory_demands"].items():
+                mem[n] = mem.get(n,0)+d
+        return (all(v<=caps[e] for e,v in loads.items())
+                and all(v<=mems[n] for n,v in mem.items()))
+    best_energy, ground_utility = float("inf"), None
+    best_feasible = 0.0
+    for size in range(len(bundles)+1):
+        for chosen in itertools.combinations(bundles,size):
+            h, util = energy(chosen)
+            if h<best_energy-1e-12:
+                best_energy, ground_utility = h, util
+            if feasible(chosen):
+                best_feasible = max(best_feasible,util)
+    assert ground_utility == pytest.approx(best_feasible)

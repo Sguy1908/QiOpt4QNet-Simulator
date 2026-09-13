@@ -58,7 +58,16 @@ def mean_finite(rows, key):
 
     return statistics.fmean(values) if values else math.nan
 
-
+def coefficient_stats(value):
+    if isinstance(value, dict):
+        values = list(value.values()) or [0.0]
+        return {
+            "mean": statistics.fmean(values),
+            "min": min(values),
+            "max": max(values),
+            "n": len(values),
+        }
+    return {"mean": value, "min": value, "max": value, "n": 1}
 def summarize_group(rows):
     instances = {
         (
@@ -152,7 +161,7 @@ def main():
             )
 
             for n_requests in REQUEST_COUNTS:
-                instance_name = f"n{n_requests}"
+                instance_name = f"req{n_requests}"
                 inst = instances[instance_name]
 
                 bundles = inst["bundles"]
@@ -178,6 +187,13 @@ def main():
                     coefficient_scale=1.0,
                 )
 
+                per_resource = calibrated_coefficients(
+                    optimizer,
+                    "resource_aware_per",
+                    coefficient_scale=1.0,
+                )
+                b_stats  = coefficient_stats(per_resource["B"])
+                d_stats  = coefficient_stats(per_resource["D"])
                 b_ratio = (
                     resource_aware["B"]
                     / conventional["B"]
@@ -186,9 +202,21 @@ def main():
                     resource_aware["D"]
                     / conventional["D"]
                 )
+                b_ratio_per = b_stats["mean"]/conventional["B"]
+                d_ratio_per = d_stats["mean"]/conventional["D"]
 
                 b_tighter = b_ratio < TIGHTENING_TOL
                 d_tighter = d_ratio < TIGHTENING_TOL
+                b_tighter_per = b_ratio_per < TIGHTENING_TOL
+                d_tighter_per = d_ratio_per < TIGHTENING_TOL
+                b_n_tightened = sum(
+                    1 for v in per_resource["B"].values()
+                    if v < conventional["B"] * TIGHTENING_TOL
+                )
+                d_n_tightened = sum(
+                    1 for v in per_resource["D"].values()
+                    if v < conventional["D"] * TIGHTENING_TOL
+                )
 
                 scan_rows.append(
                     {
@@ -211,12 +239,24 @@ def main():
                             resource_aware["D"],
                         "B_ratio": b_ratio,
                         "D_ratio": d_ratio,
+                        "B_per_resource_mean": b_stats["mean"],
+                        "B_per_resource_min": b_stats["min"],
+                        "B_per_resource_max": b_stats["max"],
+                        "B_per_resource_n": b_stats["n"],
+                        "D_per_resource_mean": d_stats["mean"],
+                        "D_per_resource_min": d_stats["min"],
+                        "D_per_resource_max": d_stats["max"],
+                        "D_per_resource_n": d_stats["n"],
+                        "B_ratio_per": b_ratio_per,
+                        "D_ratio_per": d_ratio_per,
                         "B_tighter": b_tighter,
                         "D_tighter": d_tighter,
+                        "B_n_tightened": b_n_tightened,
+                        "D_n_tightened": d_n_tightened,
                     }
                 )
 
-                if b_tighter or d_tighter:
+                if b_tighter or d_tighter or b_tighter_per or d_tighter_per:
                     selected.append(
                         (
                             topology_name,
@@ -297,7 +337,7 @@ def main():
             seed=instance_seed,
         )
 
-        instance_name = f"n{n_requests}"
+        instance_name = f"req{n_requests}"
         inst = instances[instance_name]
 
         bundles = inst["bundles"]
@@ -321,6 +361,11 @@ def main():
             "resource_aware",
             coefficient_scale=1.0,
         )
+        per_resource = calibrated_coefficients(
+            optimizer,
+            "resource_aware_per",
+            coefficient_scale=1.0,
+        )
 
         b_ratio = (
             resource_aware["B"]
@@ -330,7 +375,14 @@ def main():
             resource_aware["D"]
             / conventional["D"]
         )
-
+        b_ratio_per = (
+            coefficient_stats(per_resource["B"])["mean"]
+            / conventional["B"]
+        )
+        d_ratio_per = (
+            coefficient_stats(per_resource["D"])["mean"]
+            / conventional["D"]
+        )
         oracle_utility, oracle_optimal, oracle_status = (
             _oracle_result(
                 bundles,
@@ -345,11 +397,14 @@ def main():
             f"seed={instance_seed} "
             f"B-ratio={b_ratio:.3f} "
             f"D-ratio={d_ratio:.3f}"
+            f"B-per={b_ratio_per:.3f} "
+            f"D-per={d_ratio_per:.3f} "
         )
 
         for calibration in [
             "conventional",
             "resource_aware",
+            "resource_aware_per",
         ]:
             compile_start = time.perf_counter()
 
@@ -433,9 +488,15 @@ def main():
                             "calibration": calibration,
                             "coefficient_scale": 1.0,
                             "A": coeffs["A"],
-                            "B": coeffs["B"],
+                            "B": coefficient_stats(coeffs["B"])["mean"],
+                            "B_min": coefficient_stats(coeffs["B"])["min"],
+                            "B_max": coefficient_stats(coeffs["B"])["max"],
+                            "B_n": coefficient_stats(coeffs["B"])["n"],
                             "C": coeffs["C"],
-                            "D": coeffs["D"],
+                            "D": coefficient_stats(coeffs["D"])["mean"],
+                            "D_min": coefficient_stats(coeffs["D"])["min"],
+                            "D_max": coefficient_stats(coeffs["D"])["max"],
+                            "D_n": coefficient_stats(coeffs["D"])["n"],
                             "E": coeffs["E"],
                             "B_ratio": b_ratio,
                             "D_ratio": d_ratio,
