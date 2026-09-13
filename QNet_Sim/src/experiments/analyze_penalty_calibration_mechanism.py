@@ -224,7 +224,7 @@ def main():
             )
 
             for n_requests in REQUEST_COUNTS:
-                instance_name = f"n{n_requests}"
+                instance_name = f"req{n_requests}"
                 inst = instances[instance_name]
 
                 bundles = inst["bundles"]
