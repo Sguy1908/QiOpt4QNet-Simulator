@@ -105,7 +105,8 @@ $1\,\%$ by 30~km (at that level the comparison is limited by the difference
 between the noise-aware and decoy-estimated single-photon bounds).
 
 Two caveats. Only two count rates are published, so $C(U)$ is interpolated
-log-linearly between $1.4$ and $2.0$~V and set to zero below the $0.8$~V turn-on;
+log-linearly between $1.4$ and $2.0$~V (and extrapolated above), ramped linearly from
+zero at the $0.8$~V turn-on to the $1.4$~V anchor, and set to zero below the turn-on;
 intermediate voltages are model output, not data. And for the conventional GLLP
 analysis the maximum passive-THA distances we obtain ($75.5$, $30.5$ and
 $12.0$~km) are of the same order as, but not identical to, those read from

@@ -25,6 +25,12 @@ def test_count_rate_hits_published_anchors_and_turn_on():
     assert count_rate_cps(1.7) > count_rate_cps(1.4)
 
 
+def test_count_rate_ramps_linearly_from_turn_on_to_first_anchor():
+    mid = 0.5 * (0.8 + 1.4)
+    assert count_rate_cps(mid) == pytest.approx(0.5 * 2.38e7)
+    assert 0.0 < count_rate_cps(1.0) < count_rate_cps(1.2) < count_rate_cps(1.4)
+
+
 def test_mean_photon_number_edge_cases():
     assert mean_photon_number(0.5, 1e-9) == 0.0
     assert mean_photon_number(2.0, 1.0) == float("inf")   # C*dt >= 1
