@@ -133,6 +133,39 @@ python3 run_interactive_demo.py
 PYTHONPATH=src python3 -m pytest tests/ -v
 ```
 
+## Device-level parasitic emission (VOA electroluminescence)
+
+`QNet_Sim/src/hardware/parasitic_emission.py` implements the analytic model of
+Li et al., *Security risks of VOA-induced luminescence in chip-based quantum key
+distribution*, npj Quantum Information (2026), doi:10.1038/s41534-026-01365-1:
+pulse count rate -> mean photon number, dual-source gain/QBER (Eqs. 23-24),
+passive Trojan-horse leakage (Eqs. 16-19) and decoy-state BB84 key rates. It
+reproduces the paper's published mean photon numbers (0.0048 / 0.0388 / 0.0977),
+the ~320 km ideal reach and the ~50 % short-range key-rate loss. Only two count
+rates are published, so `C(U)` between them is interpolated; the two-decoy
+estimator and the "naive vs noise-aware" comparison are reconstructions (the
+authors' code is not public), and passive-THA reach is same-order, not identical,
+to the paper's figure.
+
+`src/hardware/parasitic_network.py` couples it to the routing pipeline: extra
+QBER lowers link fidelity (`F = F0 - 1.5 dE`), and links whose passive-THA key
+rate is zero are flagged insecure so bundles crossing them can be filtered
+(security-aware admission). Those mappings are assumptions of this repo, not of
+the paper.
+
+```bash
+cd QNet_Sim
+python experiments/run_parasitic_emission.py   # ~1 min; writes results/experiments/parasitic_*.csv + figures
+PYTHONPATH=src python -m pytest tests/test_parasitic_emission.py tests/test_parasitic_network.py -v
+```
+
+Headline (exact CP-SAT allocator, 2 topologies x 10 seeds, link lengths 2-30 km):
+the fidelity effect is small (utility -0.1 / -1.7 / -6.1 % across the paper's three
+operating points), but at 2.0 V / 1.6 ns a security-blind allocator routes 6.0 of
+7.45 admitted requests over insecure links, and a security-aware one admits only
+2.0 of 7.75. A 10 dB band-pass filter on the emission removes the penalty. The
+write-up is `paper/qiopt4qnet_npj.tex` (npj-style: Results / Discussion / Methods).
+
 ## Classical baselines (`baselines/`)
 
 These exist to answer "is the quantum/QUBO solver actually worth it?" —
