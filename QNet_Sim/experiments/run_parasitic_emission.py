@@ -37,6 +37,12 @@ ALLOCATORS = ["utility_per_resource_greedy", "congestion_aware_greedy", "greedy_
 if "cp_sat_exact" in ALL_BASELINES:
     ALLOCATORS.append("cp_sat_exact")
 
+# Single allocator used for the headline summary and figures.  The exact CP-SAT
+# solver when OR-Tools is installed; otherwise a fixed heuristic, never a mix.
+REFERENCE = "cp_sat_exact" if "cp_sat_exact" in ALLOCATORS else "congestion_aware_greedy"
+REFERENCE_LABEL = ("exact CP-SAT allocator" if REFERENCE == "cp_sat_exact"
+                   else f"{REFERENCE} (OR-Tools unavailable; not exact)")
+
 TOPOLOGIES = {
     "chain8": lambda: generate_chain_topology(8, edge_capacity=4, memory_capacity=8, raw_fidelity=0.92),
     "grid3x3": lambda: generate_grid_topology(3, 3, edge_capacity=4, memory_capacity=8, raw_fidelity=0.92),
@@ -127,15 +133,19 @@ def _summarize(rows, keys):
 def aggregate(rows):
     """Summaries per (operating point, filter, scenario).
 
-    The headline summary uses the exact CP-SAT allocator when available: the
-    greedy heuristics reorder their picks under ~1e-6 utility perturbations, so
+    The headline summary uses the single ``REFERENCE`` allocator (exact CP-SAT
+    when OR-Tools is installed, else ``congestion_aware_greedy``); allocators are
+    never averaged together.  The greedy heuristics reorder their picks under ~1e-6 utility perturbations, so
     their means carry a tie-break noise floor (reported separately per
     allocator).
     """
-    ref = "cp_sat_exact" if "cp_sat_exact" in ALLOCATORS else None
-    ref_rows = [r for r in rows if ref is None or r["allocator"] == ref]
+    ref_rows = [r for r in rows if r["allocator"] == REFERENCE]
+    if not ref_rows:
+        raise RuntimeError(f"reference allocator {REFERENCE!r} produced no rows")
     keys = ["operating_point", "filter_db", "scenario"]
     out = _summarize(ref_rows, keys)
+    for row in out:
+        row["reference_allocator"] = REFERENCE
     _write(os.path.join(OUT, "parasitic_network_summary.csv"), out)
     _write(os.path.join(OUT, "parasitic_network_by_allocator.csv"),
            _summarize(rows, ["allocator"] + keys))
@@ -202,7 +212,7 @@ def figures(rate_rows, agg):
     axes[0].set_ylim(0, 10)
     axes[0].legend(fontsize=8, title="scenario", ncol=3, loc="upper center")
     fig.suptitle("Network-level effect of VOA parasitic emission "
-                 "(no filter; exact CP-SAT allocator, mean over topologies and seeds)", fontsize=10)
+                 f"(no filter; {REFERENCE_LABEL}, mean over topologies and seeds)", fontsize=10)
     fig.tight_layout()
     p = os.path.join(FIG, "parasitic_network.png")
     fig.savefig(p, dpi=150)
@@ -222,7 +232,8 @@ def figures(rate_rows, agg):
                          for f in FILTERS_DB], "--", color="#7f7f7f", label="admitted, no EL")
     ax.set_xlabel("Band-pass filter attenuation of EL (dB)")
     ax.set_ylabel("Requests (mean)")
-    ax.set_title(f"Filtering the EL restores capacity ({worst})", fontsize=10)
+    ax.set_title(f"Filtering the EL restores capacity ({worst})\n{REFERENCE_LABEL}",
+                 fontsize=9)
     ax.legend(fontsize=8)
     ax.grid(alpha=0.3)
     fig.tight_layout()

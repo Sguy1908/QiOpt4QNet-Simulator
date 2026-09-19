@@ -159,7 +159,10 @@ python experiments/run_parasitic_emission.py   # ~1 min; writes results/experime
 PYTHONPATH=src python -m pytest tests/test_parasitic_emission.py tests/test_parasitic_network.py -v
 ```
 
-Headline (exact CP-SAT allocator, 2 topologies x 10 seeds, link lengths 2-30 km):
+Headline (exact CP-SAT allocator, 2 topologies x 10 seeds, link lengths 2-30 km;
+without OR-Tools the runner uses `congestion_aware_greedy` instead and labels the
+figures and the `reference_allocator` CSV column accordingly, so those numbers
+are not exact):
 the fidelity effect is small (utility -0.1 / -1.7 / -6.1 % across the paper's three
 operating points), but at 2.0 V / 1.6 ns a security-blind allocator routes 6.0 of
 7.45 admitted requests over insecure links, and a security-aware one admits only
