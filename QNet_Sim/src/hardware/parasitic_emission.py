@@ -65,13 +65,16 @@ def count_rate_cps(voltage: float) -> float:
 
     Only C(1.4 V) and C(2.0 V) are published numerically (Table 1).  Between
     them, and above 2 V, C is interpolated/extrapolated log-linearly; between
-    the 0.8 V turn-on and 1.4 V it is extrapolated on the same exponential,
-    and it is zero below the turn-on.  This is a model of the trend visible in
-    Fig. 3c, not a measurement: use the two anchors when exactness matters.
+    the 0.8 V turn-on and 1.4 V it is interpolated linearly from zero to the
+    1.4 V anchor, and it is zero below the turn-on.  This is a model of the
+    trend visible in Fig. 3c, not a measurement: use the two anchors when
+    exactness matters.
     """
     if voltage <= TURN_ON_VOLTAGE:
         return 0.0
     (u1, c1), (u2, c2) = sorted(_MEASURED_COUNT_RATE.items())
+    if voltage < u1:
+        return c1 * (voltage - TURN_ON_VOLTAGE) / (u1 - TURN_ON_VOLTAGE)
     slope = math.log(c2 / c1) / (u2 - u1)
     return c1 * math.exp(slope * (voltage - u1))
 
