@@ -200,8 +200,6 @@ def figures(rate_rows, agg):
                             "Admissions over insecure links")):
         for i, (scen, col) in enumerate((("clean", "#7f7f7f"), ("blind", "#d62728"),
                                          ("aware", "#1f77b4"))):
-            if key == "mean_insecure_admitted" and scen == "clean":
-                continue  # counterfactual (no EL is emitted), not meaningful
             vals = [lookup[(o, 0.0, scen)][key] for o in ops]
             ax.bar([j + (i - 1) * width for j in range(len(ops))], vals, width,
                    color=col, label=scen)

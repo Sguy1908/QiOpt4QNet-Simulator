@@ -253,12 +253,19 @@ def key_rate_dual_source(length_km: float, mu_el: float,
 
     ``mode="naive"``: Alice and Bob feed the *observed* (noise-inflated) gains
     into the standard two-decoy estimator, i.e. they trust the source model --
-    the situation the paper calls the dual-source flaw.  The result can
-    *overestimate* the true secure rate.
+    the situation the paper calls the dual-source flaw.
 
-    ``mode="aware"``: the single-photon yield and error are taken exactly
-    (Eq. 66), with the noise treated as a separate source, so the bound is
-    what a noise-aware analysis would certify.
+    ``mode="aware"``: the parasitic source is characterised separately (its
+    ``mu_EL`` is known), so its clicks are removed from the decoy statistics and
+    the signal-photon contribution ``Q1 = s e^-s Y1^L`` is the *same* certified
+    bound as the noise-free analysis.  Noise cannot create key: it only adds
+    errors, and in the worst case all of them are charged to the single-photon
+    key bits, ``e1 = e1^U + (E1 Y1)_noise / Y1^L`` (capped at 1/2), where
+    ``(E1 Y1)_noise`` is the increase of Eq. 66's single-photon error mass over
+    its ``mu_EL = 0`` value.  Error correction is charged for the *observed*
+    (noisy) signal gain and QBER.  By construction the certified rate never
+    exceeds ``key_rate_ideal`` at the same distance and equals it at
+    ``mu_EL = 0``.
     """
     obs = _observed(length_km, mu_el, params)
     qs, es = obs["s"]
@@ -266,9 +273,17 @@ def key_rate_dual_source(length_km: float, mu_el: float,
         y1, e1 = decoy_bounds(qs, obs["v"][0], obs["w"][0],
                               es, obs["v"][1], obs["w"][1], params)
     elif mode == "aware":
-        y1, e1 = single_photon_yield_error(mu_el, params.eta_signal(length_km),
-                                           params.eta_parasitic(length_km),
-                                           params.y0, params.e_d)
+        clean = _observed(length_km, 0.0, params)
+        y1, e1_clean = decoy_bounds(clean["s"][0], clean["v"][0], clean["w"][0],
+                                    clean["s"][1], clean["v"][1], clean["w"][1], params)
+        if y1 <= 0.0:
+            return 0.0
+        eta = params.eta_signal(length_km)
+        eta_p = params.eta_parasitic(length_km)
+        y_n, e_n = single_photon_yield_error(mu_el, eta, eta_p, params.y0, params.e_d)
+        y_0, e_0 = single_photon_yield_error(0.0, eta, eta_p, params.y0, params.e_d)
+        extra_errors = max(e_n * y_n - e_0 * y_0, 0.0)
+        e1 = min(e1_clean + extra_errors / y1, 0.5)
     else:
         raise ValueError(f"mode must be 'naive' or 'aware' (got {mode!r})")
     q1 = params.signal * math.exp(-params.signal) * y1

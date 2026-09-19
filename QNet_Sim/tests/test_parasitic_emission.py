@@ -122,6 +122,36 @@ def test_dual_source_penalty_vanishes_at_distance():
         key_rate_ideal(30.0), rel=0.02)
 
 
+def test_aware_rate_never_exceeds_ideal_and_matches_it_without_noise():
+    # Regression: the aware bound once used the exact single-photon yield while
+    # key_rate_ideal uses the (lower) decoy bound, so parasitic light appeared
+    # to *raise* the certified rate by ~0.8 % beyond ~30 km.
+    for op in PAPER_OPERATING_POINTS:
+        for mu in (op.mu, 0.3, 1.0):
+            for length in range(0, 341, 5):
+                assert key_rate_dual_source(float(length), mu, mode="aware")                     <= key_rate_ideal(float(length)) + 1e-15
+    for length in (0.0, 50.0, 200.0):
+        assert key_rate_dual_source(length, 0.0, mode="aware") == pytest.approx(
+            key_rate_ideal(length), rel=1e-12)
+
+
+def test_aware_rate_at_50km_is_at_most_ideal_for_every_operating_point():
+    ideal = key_rate_ideal(50.0)
+    assert ideal > 0.0
+    for op in PAPER_OPERATING_POINTS:
+        aware = key_rate_dual_source(50.0, op.mu, mode="aware")
+        assert 0.0 < aware <= ideal
+        # noise only adds errors, so the loss is tiny but never a gain
+        assert aware == pytest.approx(ideal, rel=1e-2)
+
+
+def test_aware_rate_is_monotone_non_increasing_in_noise():
+    for length in (0.0, 5.0, 20.0, 50.0):
+        rates = [key_rate_dual_source(length, m, mode="aware")
+                 for m in (0.0, 0.005, 0.04, 0.1, 0.3)]
+        assert rates == sorted(rates, reverse=True)
+
+
 def test_dual_source_rejects_unknown_mode():
     with pytest.raises(ValueError):
         key_rate_dual_source(1.0, 0.01, mode="bogus")

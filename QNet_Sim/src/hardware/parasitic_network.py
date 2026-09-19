@@ -182,25 +182,38 @@ def run_parasitic_network_study(topology_fn: Callable[[], dict],
                                   pulse_width_s, filter_db, params, length_range)
     insecure = info["insecure_edges"]
     aware_b = secure_bundles(deg_b, insecure)
-    all_ids = sorted({b["request_id"] for b in clean_b} | {b["request_id"] for b in deg_b})
+    # Request ids come from a process-wide counter, so the clean and degraded
+    # instances carry different ids for the same requests: never take their
+    # union.  Every scenario offers exactly ``n_requests`` requests (a request
+    # whose bundles were all removed still counts as rejected).
+    all_ids = [f"offered_{i}" for i in range(n_requests)]
 
     rows: List[dict] = []
     for scenario, bundles in (("clean", clean_b), ("blind", deg_b), ("aware", aware_b)):
+        # The clean scenario has no emission at all: no noise, no insecure links,
+        # no fidelity change, whatever the degraded scenarios below computed.
+        if scenario == "clean":
+            meta = {"mu_el": 0.0, "n_insecure_edges": 0, "mean_delta_f": 0.0}
+            scenario_insecure: Set[Edge] = set()
+        else:
+            meta = {"mu_el": info["mu"], "n_insecure_edges": len(insecure),
+                    "mean_delta_f": info["mean_delta_f"]}
+            scenario_insecure = insecure
         for name in names:
             res = ALL_BASELINES[name](bundles, ec, mc, seed=seed).solve()
             m = compute_metrics(res, bundles, ec, mc, all_request_ids=all_ids)
             rows.append({
                 "scenario": scenario, "allocator": name,
-                "mu_el": info["mu"], "filter_db": filter_db,
+                "mu_el": meta["mu_el"], "filter_db": filter_db,
                 "n_bundles": len(bundles),
                 "accepted": m["accepted_requests"], "n_requests": m["total_requests"],
                 "acceptance_rate": m["acceptance_rate"],
                 "total_utility": m["total_utility"],
                 "avg_fidelity": m["avg_fidelity"],
                 "insecure_admitted": count_insecure_selected(res["selected"], bundles,
-                                                             insecure),
-                "n_insecure_edges": len(insecure),
-                "mean_delta_f": info["mean_delta_f"],
+                                                             scenario_insecure),
+                "n_insecure_edges": meta["n_insecure_edges"],
+                "mean_delta_f": meta["mean_delta_f"],
                 "feasible": m["feasible"],
             })
     return rows

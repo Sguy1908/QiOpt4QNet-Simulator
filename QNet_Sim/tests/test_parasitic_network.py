@@ -83,6 +83,36 @@ def test_study_scenarios_and_security_awareness():
     assert by["blind"]["total_utility"] <= by["clean"]["total_utility"] + 1e-9
 
 
+def test_clean_rows_carry_no_emission_metadata():
+    rows = run_parasitic_network_study(_grid(), WORST.voltage, WORST.pulse_width_s,
+                                       n_requests=8, seed=3,
+                                       allocators=["congestion_aware_greedy"],
+                                       length_range=(2.0, 30.0))
+    by = {r["scenario"]: r for r in rows}
+    clean = by["clean"]
+    assert clean["mu_el"] == 0.0
+    assert clean["insecure_admitted"] == 0
+    assert clean["n_insecure_edges"] == 0
+    assert clean["mean_delta_f"] == 0.0
+    for scen in ("blind", "aware"):
+        assert by[scen]["mu_el"] == pytest.approx(WORST.mu)
+        assert by[scen]["n_insecure_edges"] > 0
+        assert by[scen]["mean_delta_f"] > 0.0
+
+
+def test_request_count_and_acceptance_rate_use_offered_requests():
+    # Regression: request ids differ between the clean and degraded instances
+    # (global counter), and their union used to double n_requests.
+    rows = run_parasitic_network_study(_grid(), WORST.voltage, WORST.pulse_width_s,
+                                       n_requests=8, seed=3,
+                                       allocators=["congestion_aware_greedy"],
+                                       length_range=(2.0, 30.0))
+    for r in rows:
+        assert r["n_requests"] == 8
+        assert r["acceptance_rate"] == pytest.approx(r["accepted"] / 8)
+        assert r["accepted"] <= 8
+
+
 def test_study_with_strong_filter_matches_clean_admission():
     rows = run_parasitic_network_study(_grid(), WORST.voltage, WORST.pulse_width_s,
                                        n_requests=8, seed=3, filter_db=30.0,

@@ -98,11 +98,10 @@ points, matching the reported values. Without parasitic light the decoy-state
 BB84 rate is $0.099$ bit/pulse at zero distance and vanishes at
 322~km, consistent with the $\approx$320~km reach in Fig.~6 of
 ref.~\cite{li2026voa}. At $U=2.0$~V, $\Delta t=1.6$~ns the dual-source rate at
-zero distance falls to $0.049$ bit/pulse (a $50\,\%$ reduction) and is
-non-monotonic in distance, rising to $0.057$ at 5~km before falling, as in their
-Fig.~8. The penalty relative to the ideal rate falls below $5\,\%$ by 20~km and below
-$1\,\%$ by 30~km (at that level the comparison is limited by the difference
-between the noise-aware and decoy-estimated single-photon bounds).
+zero distance falls to $0.048$ bit/pulse (a $51\,\%$ reduction) and is
+non-monotonic in distance, rising to $0.056$ at 5~km before falling, as in their
+Fig.~8. The noise-aware rate never exceeds the ideal rate at any distance; the penalty
+relative to it falls below $5\,\%$ by 20~km and to about $1\,\%$ at 30~km.
 
 Two caveats. Only two count rates are published, so $C(U)$ is interpolated
 log-linearly between $1.4$ and $2.0$~V (and extrapolated above), ramped linearly from
@@ -148,19 +147,22 @@ the analysis in ref.~\cite{li2026voa}.}
 \label{fig:keyrate}
 \end{figure}
 
-\subsection*{A noise-blind decoy estimator is not exploited in this reconstruction}
+\subsection*{A noise-blind decoy estimator over-certifies only marginally}
 Ref.~\cite{li2026voa} argues that unmodelled parasitic clicks bias decoy-state
 parameter estimation. We implemented that scenario by feeding the observed
 (noise-inflated) gains to the standard two-decoy estimator (``naive'') and
-compared it with a bound that uses the exact single-photon yield and error rate
-in the presence of noise (``aware''). With Table~\ref{tab:params} the naive
-estimate is \emph{lower} than the aware one everywhere ($\le 1.6\,\%$ at 0~km,
-$0.9\,\%$ at 5~km), i.e.\ conservative. The key-rate loss in
-Fig.~\ref{fig:keyrate} therefore comes from the added QBER and not from an
-overestimate. This does not contradict the paper---which reports no explicit
-expression for this case---but it means that the security-relevant part of the
-dual-source flaw in our reconstruction is small, and we do not carry it into
-the network study.
+compared it with a noise-aware bound in which the parasitic source is
+characterised, its clicks are removed from the decoy statistics, and every
+noise-induced error is charged to the single-photon key bits (Methods). By
+construction the aware rate never exceeds the ideal rate. With
+Table~\ref{tab:params} the naive rate is \emph{higher} than the aware one at
+every distance, in the direction the paper predicts, but by at most
+$0.74\,\%$ (where the rate exceeds $10^{-4}$ bit/pulse; $0.68\,\%$ at 0~km,
+$0.64\,\%$ at 5~km and $<0.01\,\%$ at 50~km). The key-rate loss in
+Fig.~\ref{fig:keyrate} therefore comes almost entirely from the added QBER, not
+from mis-estimation. The paper reports no explicit expression for this case, so
+this is our reconstruction; we do not carry the estimator bias into the network
+study.
 
 \subsection*{At network level the dominant effect is security, not fidelity}
 We coupled the device model to the routing pipeline
@@ -197,8 +199,8 @@ lengths.
 requests (left), total utility (middle) and admissions traversing an insecure
 link (right) for clean, security-blind and security-aware allocation at the
 three operating points, without a filter. Exact CP-SAT allocator, mean over both
-topologies and 10 seeds. The ``clean'' bar is omitted from the right panel
-because no light is emitted in that scenario.}
+topologies and 10 seeds; the ``clean'' scenario emits no light, so it has no
+insecure links.}
 \label{fig:network}
 \end{figure}
 
@@ -240,8 +242,8 @@ level (grey). Only three attenuation values were simulated.}
 
 \subsection*{Greedy allocators are brittle to negligible fidelity changes}
 With a $20$~dB filter the mean per-link fidelity change is
-$\Delta F\lesssim10^{-4}$ (as small as $3\times10^{-6}$ in individual
-instances), yet the greedy heuristics
+$\Delta F\approx5\times10^{-5}$ (between $3\times10^{-6}$ and $2\times10^{-4}$
+across instances), yet the greedy heuristics
 still admit $0.1$--$0.2$ fewer requests on average than in the clean scenario,
 whereas the exact allocator loses none ($7.75$ vs $7.75$). The bundle lists
 are identical or nearly identical in size; a perturbation of the utility of order $10^{-6}$ reorders
@@ -329,9 +331,25 @@ Q&=1-(1-Y_0)(1-s_c)(1-n_c),\\
 EQ&=Y_0e_0+e_ds_c+e_0n_c-Y_0e_0e_ds_c-Y_0e_0^2n_c-e_de_0s_cn_c
 +Y_0e_0^2e_ds_cn_c,
 \end{align}
-with $e_0=1/2$ (the paper's Eqs.~23--24). The exact single-photon yield and
-error rate used in the ``aware'' bound follow by setting the signal photon number
-to one in the same construction.
+with $e_0=1/2$ (the paper's Eqs.~23--24). The exact single-photon yield $Y_1$ and
+error mass $E_1Y_1$ in the presence of noise follow by setting the signal photon
+number to one in the same construction (Eq.~66 of the paper, averaged over the
+noise Poisson law).
+
+\subsection*{Noise-aware key rate}
+The parasitic source is characterised, so its clicks are removed from the decoy
+statistics and the single-photon contribution $Q_1=s\,e^{-s}Y_1^L$ is the same
+bound as in the noise-free analysis; noise adds errors but no key. Charging all
+of them to the single-photon key bits,
+\begin{equation}
+e_1=\min\Bigl\{\tfrac12,\ e_1^U+\frac{(E_1Y_1)_{\muEL}-(E_1Y_1)_{0}}{Y_1^L}\Bigr\},
+\qquad
+R=q\Bigl\{Q_1\bigl[1-\hbin(e_1)\bigr]-Q_sf_{\mathrm{EC}}\hbin(E_s)\Bigr\},
+\end{equation}
+with $Q_s,E_s$ the observed noisy signal gain and QBER. This rate equals the
+ideal one at $\muEL=0$ and is never larger than it at any distance (a regression
+test checks $0$--$340$~km at three drive levels and $\muEL=0.3,1.0$, and the
+50~km case explicitly).
 
 \subsection*{Network coupling}
 For a link of length $L$, raw fidelity $F_0$ and $e_d=\tfrac23(1-F_0)$, let

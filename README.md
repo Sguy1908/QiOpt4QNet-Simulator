@@ -141,7 +141,9 @@ distribution*, npj Quantum Information (2026), doi:10.1038/s41534-026-01365-1:
 pulse count rate -> mean photon number, dual-source gain/QBER (Eqs. 23-24),
 passive Trojan-horse leakage (Eqs. 16-19) and decoy-state BB84 key rates. It
 reproduces the paper's published mean photon numbers (0.0048 / 0.0388 / 0.0977),
-the ~320 km ideal reach and the ~50 % short-range key-rate loss. Only two count
+the ~320 km ideal reach and the ~50 % short-range key-rate loss (48.6 % of the
+ideal rate remains at 0 km, worst case). The noise-aware key rate never exceeds
+the ideal rate at the same distance (regression-tested). Only two count
 rates are published, so `C(U)` between them is interpolated; the two-decoy
 estimator and the "naive vs noise-aware" comparison are reconstructions (the
 authors' code is not public), and passive-THA reach is same-order, not identical,
