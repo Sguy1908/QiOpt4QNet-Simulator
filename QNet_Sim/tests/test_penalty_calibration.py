@@ -11,6 +11,7 @@ from optimization.proposed_calibrator import (
     coefficient_bound,
     possible_loads,
     proposed_global_coefficients,
+    proposed_resource_coefficients,
 )
 from optimization.qubo_optimizer import QUBOOptimizer
 
@@ -179,3 +180,271 @@ def test_unknown_strategy_rejected():
     opt = _optimizer([_bundle("b0", "r0", 1.0, 1, 1)])
     with pytest.raises(ValueError, match="strategy"):
         calibrated_coefficients(opt, "mystery")
+
+def test_scalar_penalty_broadcasts():
+    opt = _optimizer(
+        [
+            _bundle("b0", "r0", 5.0, 2, 3),
+            _bundle("b1", "r1", 9.0, 3, 3),
+        ]
+    )
+    scalar = opt.to_qubo(penalty=10.0, edge_penalty=7.0, memory_penalty=3.0)
+    mapped=opt.to_qubo(penalty=10.0, edge_penalty={e: 7.0 for e in opt.edge_demands}, memory_penalty={n: 3.0 for n in opt.memory_demands},)
+    assert scalar == mapped
+
+def test_per_resource_never_exceeds_global():
+    opt = _optimizer(
+        [
+            _bundle("b0", "r0", 5.0, 2, 3),
+            _bundle("b1", "r1", 9.0, 3, 3),
+            _bundle("b2", "r2", 3.0, 4, 4),
+        ],
+        edge_capacity=6,
+        memory_capacity=6,
+    )
+    conventional = conventional_coefficients(opt)
+    glob=proposed_global_coefficients(opt)
+    per=proposed_resource_coefficients(opt)
+    for value in per["B"].values():
+        assert value <= glob["B"] + 1e-12
+        assert value <= conventional["B"] + 1e-12
+    for value in per["D"].values():
+        assert value <= glob["D"] + 1e-12
+        assert value <= conventional["D"] + 1e-12
+
+def test_per_resource_preserves_ground_state():
+    import itertools
+    def _b(bid,rid,utility,ab,bc,mem):
+        return{
+            "bundle_id": bid,
+            "request_id": rid,
+            "path": ["A","B","C"],
+            "edge_demands": {("A","B"):ab,("B","C"):bc},
+            "memory_demands":{"B":mem},
+            "utility":utility,
+        }
+    # b0 and b1 share request r0 and are jointly capacity-feasible with a
+    # combined utility of 15, beating the best genuinely feasible selection
+    # (b0+b3 = 14). Only the at-most-one penalty A excludes them, so this
+    # instance fails if the A term is dropped.
+    bundles=[
+        _b("b0","r0",9.0,3,0,2),
+        _b("b1","r0",6.0,1,2,1),
+        _b("b2","r1",7.0,2,3,2),
+        _b("b3","r2",5.0,0,2,1),
+    ]
+    caps={("A", "B"): 4, ("B", "C"): 4}
+    mems={"B": 3}
+    opt=QUBOOptimizer(bundles,caps,mems)
+    coeffs = proposed_resource_coefficients(opt)
+
+    def energy(chosen):
+        util = sum(b["utility"] for b in chosen)
+        loads, mem = {}, {}
+        for b in chosen:
+            for e, d in b["edge_demands"].items():
+                loads[e] = loads.get(e, 0) + d
+            for n, d in b["memory_demands"].items():
+                mem[n] = mem.get(n, 0) + d
+        per_request = {}
+        for b in chosen:
+            per_request[b["request_id"]] = per_request.get(b["request_id"], 0) + 1
+        h=-util
+        for count in per_request.values():
+            h+=coeffs["A"]*count*(count-1)/2.0
+        for e, load in loads.items():
+            over = load-caps[e]
+            if over>0:
+                h+=coeffs["B"][e]*over*over
+        for n, load in mem.items():
+            over = load-mems[n]
+            if over>0:
+                h+=coeffs["D"][n]*over*over
+        return h,util
+
+    def feasible(chosen):
+        seen = set()
+        loads,mem = {}, {}
+        for b in chosen:
+            if b["request_id"] in seen:
+                return False
+            seen.add(b["request_id"])
+            for e,d in b["edge_demands"].items():
+                loads[e] = loads.get(e,0)+d
+            for n,d in b["memory_demands"].items():
+                mem[n] = mem.get(n,0)+d
+        return (all(v<=caps[e] for e,v in loads.items())
+                and all(v<=mems[n] for n,v in mem.items()))
+    best_energy, ground_utility = float("inf"), None
+    best_feasible = 0.0
+    for size in range(len(bundles)+1):
+        for chosen in itertools.combinations(bundles,size):
+            h, util = energy(chosen)
+            if h<best_energy-1e-12:
+                best_energy, ground_utility = h, util
+            if feasible(chosen):
+                best_feasible = max(best_feasible,util)
+    assert ground_utility == pytest.approx(best_feasible)
+
+
+def test_per_resource_ground_state_of_compiled_qubo():
+    """Brute-force the compiled QUBO itself, not a hand-written copy of it."""
+    import itertools
+
+    def _b(bid, rid, utility, ab, bc, mem):
+        return {
+            "bundle_id": bid,
+            "request_id": rid,
+            "path": ["A", "B", "C"],
+            "edge_demands": {("A", "B"): ab, ("B", "C"): bc},
+            "memory_demands": {"B": mem},
+            "utility": utility,
+        }
+
+    bundles = [
+        _b("b0", "r0", 9.0, 3, 0, 2),
+        _b("b1", "r0", 6.0, 1, 2, 1),
+        _b("b2", "r1", 7.0, 2, 3, 2),
+        _b("b3", "r2", 5.0, 0, 2, 1),
+    ]
+    caps = {("A", "B"): 4, ("B", "C"): 4}
+    mems = {"B": 3}
+    opt = QUBOOptimizer(bundles, caps, mems)
+    coeffs = proposed_resource_coefficients(opt)
+
+    qubo, offset = opt.to_qubo(
+        penalty=coeffs["A"],
+        edge_penalty=coeffs["B"],
+        memory_penalty=coeffs["D"],
+        congestion_penalty=0.0,
+        memory_congestion_penalty=0.0,
+    )
+
+    variables = sorted({v for pair in qubo for v in pair})
+    assert len(variables) <= 20, "brute force would be too large"
+
+    best_energy, best_assignment = float("inf"), None
+    for bits in itertools.product([0, 1], repeat=len(variables)):
+        assignment = dict(zip(variables, bits))
+        energy = offset + sum(
+            weight * assignment[i] * assignment[j]
+            for (i, j), weight in qubo.items()
+        )
+        if energy < best_energy - 1e-9:
+            best_energy, best_assignment = energy, assignment
+
+    sample = {name: best_assignment.get(name, 0) for name in opt.variable_map}
+    selected = opt.decode_sample(sample)
+
+    # The compiled model must enforce at-most-one per request on its own.
+    assert len(selected) == len({rid for rid, _ in selected})
+
+    chosen_keys = set(selected)
+    chosen = [b for b in bundles if (b["request_id"], b["bundle_id"]) in chosen_keys]
+    ground_utility = sum(b["utility"] for b in chosen)
+
+    def capacity_ok(group):
+        loads, mem = {}, {}
+        for b in group:
+            for e, d in b["edge_demands"].items():
+                loads[e] = loads.get(e, 0) + d
+            for n, d in b["memory_demands"].items():
+                mem[n] = mem.get(n, 0) + d
+        return (all(v <= caps[e] for e, v in loads.items())
+                and all(v <= mems[n] for n, v in mem.items()))
+
+    best_feasible = 0.0
+    for size in range(len(bundles) + 1):
+        for group in itertools.combinations(bundles, size):
+            distinct = len({b["request_id"] for b in group}) == len(group)
+            if distinct and capacity_ok(group):
+                best_feasible = max(best_feasible, sum(b["utility"] for b in group))
+
+    assert capacity_ok(chosen)
+    assert ground_utility == pytest.approx(best_feasible)
+
+
+def test_per_resource_coefficient_scale_applies_to_every_resource():
+    opt = _optimizer(
+        [
+            _bundle("b0", "r0", 10.0, 4, 4),
+            _bundle("b1", "r1", 8.0, 4, 4),
+        ],
+        edge_capacity=5,
+        memory_capacity=5,
+    )
+    base = calibrated_coefficients(
+        opt, "resource_aware_per", coefficient_scale=1.0,
+        congestion_penalty=0.25, memory_congestion_penalty=0.5,
+    )
+    scaled = calibrated_coefficients(
+        opt, "resource_aware_per", coefficient_scale=3.0,
+        congestion_penalty=0.25, memory_congestion_penalty=0.5,
+    )
+
+    assert isinstance(base["B"], dict)
+    assert isinstance(base["D"], dict)
+    for family in ("B", "D"):
+        assert set(scaled[family]) == set(base[family])
+        for resource, value in base[family].items():
+            assert math.isclose(scaled[family][resource], 3.0 * value)
+    assert math.isclose(scaled["A"], 3.0 * base["A"])
+    assert scaled["C"] == base["C"] == 0.25
+    assert scaled["E"] == base["E"] == 0.5
+
+
+def test_per_resource_unreachable_overload_gets_only_epsilon():
+    def _b(bid, rid, utility, ab, bc):
+        return {
+            "bundle_id": bid,
+            "request_id": rid,
+            "path": ["A", "B", "C"],
+            "edge_demands": {("A", "B"): ab, ("B", "C"): bc},
+            "memory_demands": {"B": 1},
+            "utility": utility,
+        }
+
+    # ("A","B") has capacity 100 against a total demand of 2, so it can never
+    # overload; ("B","C") has capacity 4 against a total demand of 6, so it can.
+    opt = QUBOOptimizer(
+        [_b("b0", "r0", 20.0, 1, 3), _b("b1", "r1", 10.0, 1, 3)],
+        {("A", "B"): 100, ("B", "C"): 4},
+        {"B": 50},
+    )
+    coeffs = proposed_resource_coefficients(opt)
+    eps = penalty_epsilon(20.0)
+
+    assert math.isclose(coeffs["B"][("A", "B")], eps)
+    assert coeffs["B"][("B", "C")] > eps
+    assert math.isclose(coeffs["D"]["B"], eps)
+
+
+def test_per_resource_dict_missing_resource_raises_clear_error():
+    opt = _optimizer(
+        [
+            _bundle("b0", "r0", 5.0, 2, 3),
+            _bundle("b1", "r1", 9.0, 3, 3),
+        ]
+    )
+    with pytest.raises(ValueError, match="edge_penalty is missing coefficients"):
+        opt.to_qubo(penalty=1.0, edge_penalty={}, memory_penalty=1.0)
+
+
+def test_reversed_edge_keys_are_accepted():
+    opt = _optimizer(
+        [
+            _bundle("b0", "r0", 5.0, 2, 3),
+            _bundle("b1", "r1", 9.0, 3, 3),
+        ]
+    )
+    forward = opt.to_qubo(
+        penalty=10.0,
+        edge_penalty={e: 7.0 for e in opt.edge_demands},
+        memory_penalty=3.0,
+    )
+    reversed_keys = opt.to_qubo(
+        penalty=10.0,
+        edge_penalty={tuple(reversed(e)): 7.0 for e in opt.edge_demands},
+        memory_penalty=3.0,
+    )
+    assert forward == reversed_keys

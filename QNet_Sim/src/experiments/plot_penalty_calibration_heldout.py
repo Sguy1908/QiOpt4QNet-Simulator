@@ -8,25 +8,53 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 
 
-RESULTS_DIR = Path("results/penalty_calibration")
+RESULTS_DIR = (
+    Path(__file__).resolve().parents[2]
+    / "results"
+    / "penalty_calibration"
+)
 FIGURES_DIR = RESULTS_DIR / "figures"
 
-MECHANISM_CSV = RESULTS_DIR / "heldout_mechanism_analysis.csv"
 COEFFICIENT_SCAN_CSV = RESULTS_DIR / "heldout_coefficient_scan.csv"
 PAIRED_ANALYSIS_CSV = RESULTS_DIR / "heldout_paired_analysis.csv"
 
-FAMILY_COLORS = {
-    "B": "#4477AA",
-    "D": "#EE8833",
-}
-SAMPLER_COLORS = {
-    "sa": "#4477AA",
-    "sqa": "#EE8833",
+CALIBRATION_STYLES = {
+    "resource_aware": {
+        "label": "Global",
+        "color": "#4477AA",
+        "marker": "o",
+    },
+    "resource_aware_per": {
+        "label": "Per resource",
+        "color": "#EE8833",
+        "marker": "s",
+    },
 }
 
+# Figure 3 is keyed by (treatment, baseline): per-resource now appears twice,
+# once against conventional and once against the global rule.
+CONTRAST_STYLES = {
+    ("resource_aware", "conventional"): {
+        "label": "Global vs conventional",
+        "color": "#4477AA",
+        "marker": "o",
+        "offset": 0.22,
+    },
+    ("resource_aware_per", "conventional"): {
+        "label": "Per resource vs conventional",
+        "color": "#EE8833",
+        "marker": "s",
+        "offset": 0.0,
+    },
+    ("resource_aware_per", "resource_aware"): {
+        "label": "Per resource vs global",
+        "color": "#228833",
+        "marker": "^",
+        "offset": -0.22,
+    },
+}
 FIG_WIDTH = 7.2
 GRID_COLOR = "#E6E6E6"
 SPINE_COLOR = "#333333"
@@ -80,298 +108,216 @@ def save_figure(fig, stem: str, *, tight_rect=None) -> None:
     fig.savefig(FIGURES_DIR / f"{stem}.png", dpi=300, bbox_inches="tight")
 
 
-def make_figure_1(mechanism_rows: list[dict[str, str]]) -> None:
-    grouped: dict[tuple[int, str], dict[str, str]] = {}
-    for row in mechanism_rows:
-        n_requests = int(row["n_requests"])
-        family = row["family"].strip().lower()
-        grouped[(n_requests, family)] = row
-
-    request_counts = sorted({int(row["n_requests"]) for row in mechanism_rows})
-
-    def series(family: str, column: str) -> list[float]:
-        return [
-            100.0 * float(require(grouped, (n, family), "mechanism row")[column])
-            for n in request_counts
-        ]
-
-    edge_tightening = series("edge", "coefficient_tightened_fraction")
-    memory_tightening = series("memory", "coefficient_tightened_fraction")
-    edge_delta1 = series("edge", "mean_instance_delta1_fraction")
-    memory_delta1 = series("memory", "mean_instance_delta1_fraction")
-
-    fig, axes = plt.subplots(1, 2, figsize=(FIG_WIDTH, 2.65))
-
-    ax = axes[0]
-    ax.plot(
-        request_counts,
-        edge_tightening,
-        marker="o",
-        markersize=3.5,
-        linewidth=1.0,
-        color=FAMILY_COLORS["B"],
-        label="Edge penalty $B$",
+def make_figure_1(scan_rows: list[dict[str, str]]) -> None:
+    request_counts = sorted(
+        {int(row["n_requests"]) for row in scan_rows}
     )
-    ax.plot(
-        request_counts,
-        memory_tightening,
-        marker="s",
-        markersize=3.5,
-        linewidth=1.0,
-        color=FAMILY_COLORS["D"],
-        label="Memory penalty $D$",
-    )
-    ax.set_xlabel("Number of requests")
-    ax.set_ylabel("Instances tightened (%)")
-    ax.set_title("Tightening frequency")
-    ax.set_xticks(request_counts)
-    ax.set_ylim(0, max(edge_tightening + memory_tightening) * 1.15)
-    legend = ax.legend(
-        loc="upper right",
-        frameon=True,
-        handlelength=1.8,
-        borderpad=0.35,
-        labelspacing=0.35,
-    )
-    apply_legend_style(legend)
-    apply_common_axis_style(ax)
+    fig, axes = plt.subplots(1,2,figsize=(FIG_WIDTH, 2.8))
 
-    ax = axes[1]
-    ax.plot(
-        request_counts,
-        edge_delta1,
-        marker="o",
-        markersize=3.5,
-        linewidth=1.0,
-        color=FAMILY_COLORS["B"],
-    )
-    ax.plot(
-        request_counts,
-        memory_delta1,
-        marker="s",
-        markersize=3.5,
-        linewidth=1.0,
-        color=FAMILY_COLORS["D"],
-    )
-    ax.set_xlabel("Number of requests")
-    ax.set_ylabel("Violating resource–bundle pairs (%)")
-    ax.set_title(r"Minimum penalty-drop frequency ($\delta=1$)")
-    ax.set_xticks(request_counts)
-    ax.set_ylim(0, 100)
-    apply_common_axis_style(ax)
+    for ax, family, title in zip(
+        axes, 
+        ["B", "D"],
+        ["(a) Edge penalty $B$", "(b) Memory penalty $D$"],
+    ):
+        for calibration, style in CALIBRATION_STYLES.items():
+            frequencies = []
 
+            for n_requests in request_counts:
+                group=[
+                    row for row in scan_rows
+                    if int(row["n_requests"]) == n_requests
+                ]
+                tightened = [
+                    as_bool(row[f"{family}_tighter"])
+                    if calibration == "resource_aware"
+                    else int(row[f"{family}_n_tightened"]) >0
+                    for row in group
+                ]
+                frequencies.append(
+                    100.0 * sum(tightened) / len(group)
+                )
+            ax.plot(
+                request_counts,
+                frequencies,
+                color=style["color"],
+                marker=style["marker"],
+                markersize=4,
+                linewidth=1.1,
+                label=style["label"],
+            )
+        ax.axhline(
+            0,
+            color="0.35",
+            linestyle="--",
+            linewidth=0.8,
+            label="Conventional reference",
+        )
+        ax.set(
+            title=title,
+            xlabel="Number of requests",
+            ylabel="instances tightened (%)",
+        )
+        ax.set_xticks(request_counts)
+        ax.set_ylim(-3,105)
+        ax.set_yticks([0, 25, 50, 75, 100])
+        apply_common_axis_style(ax)
+
+    apply_legend_style(axes[0].legend(loc="center right"))
     save_figure(fig, "figure1_mechanism_summary")
     plt.close(fig)
 
-
 def make_figure_2(scan_rows: list[dict[str, str]]) -> None:
-    b_all = sorted(float(row["B_ratio"]) for row in scan_rows)
-    d_all = sorted(float(row["D_ratio"]) for row in scan_rows)
+    fig, axes = plt.subplots(1,2,figsize=(FIG_WIDTH, 2.8))
 
-    b_reductions = sorted(
-        100.0 * (1.0 - float(row["B_ratio"]))
-        for row in scan_rows
-        if as_bool(row["B_tighter"])
-    )
-    d_reductions = sorted(
-        100.0 * (1.0 - float(row["D_ratio"]))
-        for row in scan_rows
-        if as_bool(row["D_tighter"])
-    )
+    for ax, family, title in zip(
+        axes,
+        ["B", "D"],
+        ["(a) Edge penalty $B$", "(b) Memory penalty $D$"],
+    ):
+        for calibration, style in CALIBRATION_STYLES.items():
+            column = f"{family}_ratio"
+            if calibration == "resource_aware_per":
+                column += "_per"
+            reductions = sorted(
+                100.0 * (1.0 - float(row[column]))
+                for row in scan_rows
+            )
+            cumulative = [
+                100.0 * (i+1) / len(reductions)
+                for i in range(len(reductions))
+            ]
 
-    b_all_ranks = list(range(1, len(b_all) + 1))
-    d_all_ranks = list(range(1, len(d_all) + 1))
+            ax.step(
+                [reductions[0]] + reductions,
+                [0.0] + cumulative,
+                where="post",
+                color=style["color"],
+                linewidth=1.2,
+                label=style["label"],
+            )
 
-    fig, axes = plt.subplots(1, 2, figsize=(FIG_WIDTH, 2.7))
-
-    ax = axes[0]
-    ax.plot(
-        b_all_ranks,
-        b_all,
-        color=FAMILY_COLORS["B"],
-        linewidth=1.0,
-        label="Edge penalty $B$",
-    )
-    ax.plot(
-        d_all_ranks,
-        d_all,
-        color=FAMILY_COLORS["D"],
-        linewidth=1.0,
-        label="Memory penalty $D$",
-    )
-    ax.axhline(
-        1.0,
-        color="0.2",
-        linestyle="--",
-        linewidth=0.8,
-        zorder=4,
-    )
-    max_rank = max(len(b_all), len(d_all))
-    rank_ticks = sorted(
-        {
-            1,
-            round(0.25 * max_rank),
-            round(0.50 * max_rank),
-            round(0.75 * max_rank),
-            max_rank,
-        }
-    )
-    ax.set_xlabel("Benchmark instances ranked by ratio")
-    ax.set_ylabel("Coefficient relative to utility-scale baseline")
-    ax.set_title("Coefficient ratios")
-    ax.set_xlim(1, max_rank)
-    ax.set_xticks(rank_ticks)
-    ax.set_ylim(0, 1.03)
-    legend = ax.legend(
-        loc="lower right",
-        frameon=True,
-        handlelength=1.8,
-        borderpad=0.35,
-        labelspacing=0.35,
-    )
-    apply_legend_style(legend)
-    apply_common_axis_style(ax)
-
-    ax = axes[1]
-    boxplot = ax.boxplot(
-        [b_reductions, d_reductions],
-        positions=[1.0, 2.0],
-        widths=0.40,
-        patch_artist=True,
-        whis=1.5,
-        showcaps=False,
-        showfliers=True,
-        showmeans=True,
-        meanprops={
-            "marker": "o",
-            "markerfacecolor": "black",
-            "markeredgecolor": "black",
-            "markersize": 3.2,
-        },
-        medianprops={"color": "0.15", "linewidth": 0.8},
-        whiskerprops={"color": "0.35", "linewidth": 0.8},
-        capprops={"color": "0.35", "linewidth": 0.8},
-        flierprops={
-            "marker": "o",
-            "markerfacecolor": "none",
-            "markeredgecolor": "black",
-            "markeredgewidth": 0.7,
-            "markersize": 2.8,
-        },
-    )
-    for box, color in zip(boxplot["boxes"], [FAMILY_COLORS["B"], FAMILY_COLORS["D"]]):
-        box.set_facecolor(color)
-        box.set_edgecolor("0.35")
-        box.set_alpha(0.66)
-        box.set_linewidth(0.8)
-
-    ax.set_ylabel("Reduction from utility-scale baseline (%)")
-    ax.set_title("Reduction when tightened")
-    ax.set_xticks([1.0, 2.0])
-    ax.set_xticklabels(
-        [
-            "Edge penalty $B$",
-            "Memory penalty $D$",
-        ],
-    )
-    ax.set_xlim(0.5, 2.5)
-    ax.set_ylim(-5, 100)
-    ax.set_yticks([0, 20, 40, 60, 80, 100])
-    apply_common_axis_style(ax, grid_axis="y")
-
+        ax.axvline(
+            0,
+            color="0.35",
+            linestyle="--",
+            linewidth=0.8,
+            label="Conventional reference",
+        )
+        ax.set(
+            title=title,
+            xlabel="Mean coefficient reduction (%)",
+            ylabel="Cumulative instances (%)",
+            xlim=(-2, 102),
+            ylim=(0,102),
+        )
+        ax.set_xticks([0,25,50,75,100])
+        ax.set_yticks([0,25,50,75,100])
+        apply_common_axis_style(ax)
+    apply_legend_style(axes[0].legend(loc="lower right"))
     save_figure(fig, "figure2_coefficient_ratios")
     plt.close(fig)
 
 
 def make_figure_3(paired_rows: list[dict[str, str]]) -> None:
+    # Two rows share a calibration name, so the baseline is part of the key.
     grouped = {
-        (row["sampler"].strip().lower(), row["metric"]): row for row in paired_rows
+        (
+            row["calibration"],
+            row["baseline"],
+            row["sampler"],
+            row["metric"],
+        ): row
+        for row in paired_rows
     }
 
     metrics = [
-        {
-            "key": "raw_feasible_rate",
-            "title": "Raw feasibility",
-            "xlabel": "Change vs. utility-scale (pp)",
-            "multiplier": 100.0,
-        },
-        {
-            "key": "raw_mean_overload_units",
-            "title": "Raw overload",
-            "xlabel": "Reduction vs. utility-scale (resource units/sample)",
-            "multiplier": -1.0,
-        },
-        {
-            "key": "repaired_optimality_gap_pct",
-            "title": "Repaired reference gap",
-            "xlabel": "Reduction vs. utility-scale (pp)",
-            "multiplier": -1.0,
-        },
+        (
+            "raw_feasible_rate",
+            "(a) Raw feasibility",
+            "Increase in feasible calls (pp)",
+            100.0,
+        ),
+        (
+            "repaired_reference_gap_pct",
+            "(b) Repaired solution quality",
+            "Reduction in reference gap (pp)",
+            -1.0,
+        ),
     ]
 
-    fig, axes = plt.subplots(1, 3, figsize=(FIG_WIDTH, 2.45))
+    fig, axes = plt.subplots(1, 2, figsize=(FIG_WIDTH, 2.8))
     y_positions = {"sa": 1.0, "sqa": 0.0}
-
-    for ax, metric in zip(axes, metrics):
-        plotted_values = []
+    
+    for ax, (metric,title,xlabel,multiplier) in zip(axes, metrics):
+        plotted_values = [0.0]
 
         for sampler in ["sa", "sqa"]:
-            row = require(grouped, (sampler, metric["key"]), "paired-analysis row")
-            multiplier = metric["multiplier"]
-            estimate = multiplier * float(row["mean_paired_difference"])
-            ci_low, ci_high = sorted(
-                [
-                    multiplier * float(row["bootstrap_95_ci_low"]),
-                    multiplier * float(row["bootstrap_95_ci_high"]),
-                ]
-            )
-            plotted_values.extend([ci_low, estimate, ci_high])
+            for (calibration, baseline), style in CONTRAST_STYLES.items():
+                row=require(
+                    grouped,
+                    (calibration, baseline, sampler, metric),
+                    "paired-analysis row",
+                )
+                estimate = (
+                    multiplier * float(row["mean_paired_difference"])
+                )
+                ci_low, ci_high = sorted(
+                    [
+                        multiplier * float(row["bootstrap_95_ci_low"]),
+                        multiplier * float(row["bootstrap_95_ci_high"]),
+                    ]
+                )
+                y=y_positions[sampler] + style["offset"]
 
-            ax.errorbar(
-                estimate,
-                y_positions[sampler],
-                xerr=[[estimate - ci_low], [ci_high - estimate]],
-                fmt="o",
-                color=SAMPLER_COLORS[sampler],
-                markersize=3.8,
-                capsize=2.2,
-                capthick=0.8,
-                elinewidth=0.9,
-            )
+                ax.hlines(
+                    y,
+                    ci_low,
+                    ci_high,
+                    color=style["color"],
+                    linewidth=1.2,
+                )
+                ax.plot(
+                    estimate,
+                    y,
+                    marker=style["marker"],
+                    color=style["color"],
+                    markersize=4.5,
+                    linestyle="none",
+                    label=style["label"] if sampler == "sa" else None,
+                )
+                plotted_values.extend([ci_low, estimate, ci_high])
 
-        limit = max(abs(value) for value in plotted_values)
-        padding = max(0.18 * limit, 0.03)
-        ax.set_xlim(-(limit + padding), limit + padding)
-        ax.axvline(0.0, color="0.25", linestyle="--", linewidth=0.8)
-        ax.set_title(metric["title"])
-        ax.set_xlabel(metric["xlabel"])
+        padding = max(
+            0.08 * (max(plotted_values) - min(plotted_values)),
+            0.2,
+        )
+        ax.set_xlim(
+            min(plotted_values)-padding,
+            max(plotted_values)+padding,
+        )
+        ax.axvline(
+            0,
+            color="0.35",
+            linestyle="--",
+            linewidth=0.8,
+            label="No difference",
+        )
+        ax.set(title=title, xlabel=xlabel, ylim=(-0.52, 1.58))
         ax.set_yticks([0.0, 1.0])
         ax.set_yticklabels(["SQA", "SA"])
-        ax.set_ylim(-0.55, 1.55)
         apply_common_axis_style(ax)
-
-    legend_handles = [
-        Line2D(
-            [0],
-            [0],
-            color=SAMPLER_COLORS[sampler],
-            marker="o",
-            markersize=3.8,
-            linewidth=0.9,
-            label=sampler.upper(),
+    # Three contrasts leave no in-axes gap wide enough for a legend without
+    # covering a marker, so it goes below the panels.
+    handles, labels = axes[0].get_legend_handles_labels()
+    apply_legend_style(
+        fig.legend(
+            handles,
+            labels,
+            loc="lower center",
+            ncol=4,
+            bbox_to_anchor=(0.5, -0.10),
         )
-        for sampler in ["sa", "sqa"]
-    ]
-    legend = axes[0].legend(
-        handles=legend_handles,
-        loc="upper right",
-        frameon=True,
-        handlelength=1.7,
-        borderpad=0.35,
-        labelspacing=0.35,
     )
-    apply_legend_style(legend)
-
     save_figure(fig, "figure3_solver_paired_effects")
     plt.close(fig)
 
@@ -398,7 +344,7 @@ def main() -> None:
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-    make_figure_1(load_csv_rows(MECHANISM_CSV))
+    make_figure_1(load_csv_rows(COEFFICIENT_SCAN_CSV))
     make_figure_2(load_csv_rows(COEFFICIENT_SCAN_CSV))
     make_figure_3(load_csv_rows(PAIRED_ANALYSIS_CSV))
 
