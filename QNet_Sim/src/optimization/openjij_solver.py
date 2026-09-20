@@ -1,11 +1,13 @@
 """OpenJij helpers for QiOpt4QNet.
 
 The low-level SA/SQA entry points remain available. The calibrated helpers make
-three experiment modes explicit:
+four experiment modes explicit:
 
 * conventional: utility-scale reference calibration;
-* resource_aware: proposed edge/memory-aware calibration. one global coefficient per resource family;
-* resource_aware_per: the same certtificate scoped per resource;
+* resource_aware (aliases: resource-aware, proposed): edge/memory-aware
+  calibration with one global coefficient per resource family;
+* resource_aware_per (alias: per_resource): the same certificate scoped to
+  each individual edge and memory resource;
 * fixed: user-supplied coefficients for legacy/sensitivity runs.
 
 Soft congestion C/E is kept separate from hard-constraint A/B/D calibration.
@@ -84,16 +86,19 @@ def calibrated_coefficients(
         }
     else:
         raise ValueError(
-            "strategy must be one of: conventional, resource_aware, fixed"
+            "strategy must be one of: conventional, resource_aware "
+            "(resource-aware, proposed), resource_aware_per (per_resource), fixed"
         )
 
-    # Sensitivity scaling applies only to hard constraints.
     for key in ("A", "B", "D"):
-        value=coeffs[key]
-        if isinstance(value,dict):
-            coeffs[key] = {k: v * coefficient_scale for k, v in value.items()}
+        value = coeffs[key]
+        if isinstance(value, dict):
+            coeffs[key] = {
+                resource: coefficient * coefficient_scale
+                for resource, coefficient in value.items()
+            }
         else:
-            coeffs[key] *= coefficient_scale
+            coeffs[key] = value * coefficient_scale
 
     return coeffs
 

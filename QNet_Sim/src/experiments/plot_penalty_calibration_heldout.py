@@ -33,6 +33,28 @@ CALIBRATION_STYLES = {
     },
 }
 
+# Figure 3 is keyed by (treatment, baseline): per-resource now appears twice,
+# once against conventional and once against the global rule.
+CONTRAST_STYLES = {
+    ("resource_aware", "conventional"): {
+        "label": "Global vs conventional",
+        "color": "#4477AA",
+        "marker": "o",
+        "offset": 0.22,
+    },
+    ("resource_aware_per", "conventional"): {
+        "label": "Per resource vs conventional",
+        "color": "#EE8833",
+        "marker": "s",
+        "offset": 0.0,
+    },
+    ("resource_aware_per", "resource_aware"): {
+        "label": "Per resource vs global",
+        "color": "#228833",
+        "marker": "^",
+        "offset": -0.22,
+    },
+}
 FIG_WIDTH = 7.2
 GRID_COLOR = "#E6E6E6"
 SPINE_COLOR = "#333333"
@@ -197,8 +219,14 @@ def make_figure_2(scan_rows: list[dict[str, str]]) -> None:
 
 
 def make_figure_3(paired_rows: list[dict[str, str]]) -> None:
+    # Two rows share a calibration name, so the baseline is part of the key.
     grouped = {
-        (row["calibration"], row["sampler"], row["metric"]): row
+        (
+            row["calibration"],
+            row["baseline"],
+            row["sampler"],
+            row["metric"],
+        ): row
         for row in paired_rows
     }
 
@@ -219,19 +247,15 @@ def make_figure_3(paired_rows: list[dict[str, str]]) -> None:
 
     fig, axes = plt.subplots(1, 2, figsize=(FIG_WIDTH, 2.8))
     y_positions = {"sa": 1.0, "sqa": 0.0}
-    offsets = {
-        "resource_aware": 0.13,
-        "resource_aware_per": -0.13,
-    }
-
+    
     for ax, (metric,title,xlabel,multiplier) in zip(axes, metrics):
         plotted_values = [0.0]
 
         for sampler in ["sa", "sqa"]:
-            for calibration, style in CALIBRATION_STYLES.items():
+            for (calibration, baseline), style in CONTRAST_STYLES.items():
                 row=require(
                     grouped,
-                    (calibration, sampler, metric),
+                    (calibration, baseline, sampler, metric),
                     "paired-analysis row",
                 )
                 estimate = (
@@ -243,7 +267,7 @@ def make_figure_3(paired_rows: list[dict[str, str]]) -> None:
                         multiplier * float(row["bootstrap_95_ci_high"]),
                     ]
                 )
-                y=y_positions[sampler] + offsets[calibration]
+                y=y_positions[sampler] + style["offset"]
 
                 ax.hlines(
                     y,
@@ -276,13 +300,24 @@ def make_figure_3(paired_rows: list[dict[str, str]]) -> None:
             color="0.35",
             linestyle="--",
             linewidth=0.8,
-            label="Conventional reference",
+            label="No difference",
         )
-        ax.set(title=title, xlabel=xlabel, ylim=(-0.42, 1.48))
+        ax.set(title=title, xlabel=xlabel, ylim=(-0.52, 1.58))
         ax.set_yticks([0.0, 1.0])
         ax.set_yticklabels(["SQA", "SA"])
         apply_common_axis_style(ax)
-    apply_legend_style(axes[0].legend(loc="center right"))
+    # Three contrasts leave no in-axes gap wide enough for a legend without
+    # covering a marker, so it goes below the panels.
+    handles, labels = axes[0].get_legend_handles_labels()
+    apply_legend_style(
+        fig.legend(
+            handles,
+            labels,
+            loc="lower center",
+            ncol=4,
+            bbox_to_anchor=(0.5, -0.10),
+        )
+    )
     save_figure(fig, "figure3_solver_paired_effects")
     plt.close(fig)
 

@@ -11,6 +11,7 @@ Run from QNet_Sim:
 from __future__ import annotations
 
 import csv
+import hashlib
 import math
 import os
 import random
@@ -22,7 +23,26 @@ BOOTSTRAP_SEED = 20260811
 BOOTSTRAP_SAMPLES = 10000
 TIE_TOL = 1e-12
 CALIBRATIONS = ["conventional", "resource_aware", "resource_aware_per"]
+SAMPLERS = ["sa", "sqa"]
+# (treatment, baseline). The third contrast isolates the per-resource
+# contribution relative to the global reachable-load rule, which is the
+# comparison the per-resource proposal actually needs to justify itself.
+CONTRASTS = [
+    ("resource_aware", "conventional"),
+    ("resource_aware_per", "conventional"),
+    ("resource_aware_per", "resource_aware"),
+]
 METRICS = [("raw_feasible_rate", "raw_feasible_rate", False), ("repaired_reference_gap_pct", "repaired_optimality_gap_pct", True), ("raw_mean_overload_units", "raw_mean_overload_units", True)]
+
+
+def contrast_seed(treatment, baseline, sampler, metric):
+    """Bootstrap seed fixed by the comparison itself, not by loop order.
+
+    Using an explicit digest rather than ``hash()`` keeps the seed stable
+    across processes: Python randomises string hashing per interpreter run.
+    """
+    key = "|".join([treatment, baseline, sampler, metric]).encode()
+    return BOOTSTRAP_SEED + int(hashlib.sha256(key).hexdigest()[:8], 16)
 
 def read_csv(path):
     with open(path, newline="") as handle:
@@ -44,7 +64,14 @@ def write_csv(path, rows):
 
 
 def bootstrap_mean_ci(blocks, seed):
+    """Percentile bootstrap CI for the mean paired difference.
 
+    Resampling is over instance-seed blocks rather than individual instances,
+    so instances generated from the same held-out seed stay together and the
+    interval does not assume more independence than the design provides. The
+    statistic is the ratio-of-sums across resampled blocks, which equals the
+    overall mean paired difference. 10,000 resamples, 2.5/97.5 percentiles.
+    """
     rng = random.Random(seed)
     totals=[(sum(values), len(values)) for values in blocks]
     bootstrap_means = []
@@ -119,47 +146,55 @@ def analyze_rows(rows):
 
         sampler = instance_key[-1]
 
-        for calibration in CALIBRATIONS[1:]:
+        for treatment, baseline_arm in CONTRASTS:
             for metric, column, _ in METRICS:
                 baseline = statistics.fmean(
-                    float(group["conventional"][column])
+                    float(group[baseline_arm][column])
                     for group in seeded_groups.values()
                 )
                 calibrated = statistics.fmean(
-                    float(group[calibration][column])
+                    float(group[treatment][column])
                     for group in seeded_groups.values()
                 )
-                samples[(calibration, sampler, metric)].append((instance_key[1], baseline, calibrated))
+                samples[(treatment, baseline_arm, sampler, metric)].append(
+                    (instance_key[1], baseline, calibrated)
+                )
     summary_rows = []
-    for calibration in CALIBRATIONS[1:]:
-        for sampler in {"sa", "sqa"}:
+    for treatment, baseline_arm in CONTRASTS:
+        for sampler in SAMPLERS:
             for metric, _, lower_is_better in METRICS:
-                records = samples[(calibration, sampler, metric)]
+                records = samples[(treatment, baseline_arm, sampler, metric)]
                 if not records:
-                    raise ValueError(f"No paired results: {calibration}, {sampler}")
+                    raise ValueError(
+                        f"No paired results: {treatment} vs {baseline_arm}, {sampler}"
+                    )
                 values=[calibrated - baseline for _, baseline, calibrated in records]
                 blocks = defaultdict(list)
                 for (seed, _, _), value in zip(records, values):
                     blocks[seed].append(value)
-                ci_low, ci_high = bootstrap_mean_ci(list(blocks.values()), BOOTSTRAP_SEED + len(summary_rows))
+                ci_low, ci_high = bootstrap_mean_ci(
+                    list(blocks.values()),
+                    contrast_seed(treatment, baseline_arm, sampler, metric),
+                )
                 direction = -1 if lower_is_better else 1
                 better = sum(direction*value > TIE_TOL for value in values)
                 worse = sum(direction*value < -TIE_TOL for value in values)
 
                 summary_rows.append(
                     {
-                        "calibration": calibration,
+                        "calibration": treatment,
+                        "baseline": baseline_arm,
                         "sampler": sampler,
                         "metric": metric,
                         "difference_definition":
-                            f"{calibration} - conventional",
+                            f"{treatment} - {baseline_arm}",
                         "lower_is_better": lower_is_better,
                         "n_instances": len(values),
                         "n_seed_blocks": len(blocks),
                         "solver_seeds_per_instance": len(SOLVER_SEEDS),
-                        "mean_conventional":
+                        "mean_baseline":
                             statistics.fmean(r[1] for r in records),
-                        "mean_calibrated":
+                        "mean_treatment":
                             statistics.fmean(r[2] for r in records),
                         "mean_paired_difference":
                             statistics.fmean(values),
@@ -167,8 +202,8 @@ def analyze_rows(rows):
                             statistics.median(values),
                         "bootstrap_95_ci_low": ci_low,
                         "bootstrap_95_ci_high": ci_high,
-                        "ra_better_fraction": better / len(values),
-                        "conventional_better_fraction": worse / len(values),
+                        "treatment_better_fraction": better / len(values),
+                        "baseline_better_fraction": worse / len(values),
                         "tie_fraction": (len(values) - better - worse) / len(values),
                     }
                 )
@@ -202,7 +237,7 @@ def main():
     expected = {
         case + (sampler,seed,calibration)
         for case in selected
-        for sampler in {"sa", "sqa"}
+        for sampler in SAMPLERS
         for seed in SOLVER_SEEDS
         for calibration in CALIBRATIONS
     }
@@ -273,13 +308,18 @@ def main():
     
     for row in summary:
         print(
-            f"{row['calibration']:20s} "
+            f"{row['difference_definition']:42s} "
             f"{row['sampler'].upper():3s} "
             f"{row['metric']:28s} "
-            f"mean={row['mean_paired_difference']:.6f} "
-            f"95% CI=[{row['bootstrap_95_ci_low']:.6f}, "
-            f"{row['bootstrap_95_ci_high']:.6f}]"
+            f"mean={row['mean_paired_difference']:+.6f} "
+            f"95% CI=[{row['bootstrap_95_ci_low']:+.6f}, "
+            f"{row['bootstrap_95_ci_high']:+.6f}]"
         )
+    print(
+        f"\n{len(summary)} paired comparisons "
+        f"({len(CONTRASTS)} contrasts x {len(SAMPLERS)} samplers "
+        f"x {len(METRICS)} metrics); no multiplicity correction applied."
+    )
     print(f"Wrote {len(summary)} comparisons to {output_path}")
 
 

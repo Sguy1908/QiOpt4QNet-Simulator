@@ -396,9 +396,9 @@ def main():
             f"{topology_name} {instance_name} "
             f"seed={instance_seed} "
             f"B-ratio={b_ratio:.3f} "
-            f"D-ratio={d_ratio:.3f}"
+            f"D-ratio={d_ratio:.3f} "
             f"B-per={b_ratio_per:.3f} "
-            f"D-per={d_ratio_per:.3f} "
+            f"D-per={d_ratio_per:.3f}"
         )
 
         for calibration in [
@@ -498,8 +498,19 @@ def main():
                             "D_max": coefficient_stats(coeffs["D"])["max"],
                             "D_n": coefficient_stats(coeffs["D"])["n"],
                             "E": coeffs["E"],
+                            # Instance-level ratios describing the GLOBAL rule.
+                            # They characterise the instance, not this arm.
                             "B_ratio": b_ratio,
                             "D_ratio": d_ratio,
+                            "B_ratio_per": b_ratio_per,
+                            "D_ratio_per": d_ratio_per,
+                            # This arm's own mean coefficient vs conventional.
+                            "B_ratio_arm":
+                                coefficient_stats(coeffs["B"])["mean"]
+                                / conventional["B"],
+                            "D_ratio_arm":
+                                coefficient_stats(coeffs["D"])["mean"]
+                                / conventional["D"],
                             "B_tighter":
                                 b_ratio
                                 < TIGHTENING_TOL,

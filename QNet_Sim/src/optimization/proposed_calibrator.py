@@ -88,6 +88,7 @@ def resource_bounds(
     utilities: Mapping[BundleKey, float],
 ) -> Dict[object, float]:
     """Return the single-removal coefficient bound for each resource.
+
     A resource whose capacity can never be exceeded maps to 0.0.
     """
     bounds: Dict[object, float] = {}
@@ -98,44 +99,50 @@ def resource_bounds(
         if capacity < 0:
             raise ValueError("resource capacity must be nonnegative")
         bounds[resource] = 0.0
-        loads_cache: Dict[Tuple[str, int], set[int]] = {}
+        # The reachable-load set depends only on which request is excluded:
+        # possible_loads caps the search at capacity + max competing demand,
+        # so the candidate's own demand never changes the result.
+        loads_cache: Dict[str, set[int]] = {}
         for key, demand_raw in key_demand_pairs:
             demand = int(demand_raw)
-            if demand <=0:
+            if demand <= 0:
                 continue
             request_id = key[0]
-            cache_key=(request_id, demand)
-            if cache_key not in loads_cache:
-                loads_cache[cache_key] = possible_loads(
+            if request_id not in loads_cache:
+                loads_cache[request_id] = possible_loads(
                     key_demand_pairs,
                     request_id,
                     capacity=capacity,
                     candidate_demand=demand,
                 )
-            loads = loads_cache[cache_key]
+            loads = loads_cache[request_id]
 
-            violating=[load for load in loads if load+demand>capacity]
+            violating = [load for load in loads if load + demand > capacity]
             if not violating:
                 continue
-            other_load=min(violating)
+
+            # Once violation begins, the squared-overload penalty drop grows
+            # monotonically with the competing load. The smallest reachable
+            # violating load is therefore the worst case.
+            other_load = min(violating)
             delta = _penalty_drop(other_load, demand, capacity)
             if delta <= 0:
                 continue
-            utility=max(0.0, float(utilities.get(key, 0.0)))
+
+            utility = max(0.0, float(utilities.get(key, 0.0)))
             bounds[resource] = max(bounds[resource], utility / delta)
     return bounds
 
 def coefficient_bound(
-        grouped_demands: Mapping[object, Sequence[Tuple[BundleKey, int]]],
-        capacities: Mapping[object, int],
-        utilities: Mapping[BundleKey, float],
+    grouped_demands: Mapping[object, Sequence[Tuple[BundleKey, int]]],
+    capacities: Mapping[object, int],
+    utilities: Mapping[BundleKey, float],
 ) -> float:
     """Return the largest resource-aware single-removal coefficient bound."""
     return max(
         resource_bounds(grouped_demands, capacities, utilities).values(),
         default=0.0,
     )
-
 
 
 def proposed_global_coefficients(

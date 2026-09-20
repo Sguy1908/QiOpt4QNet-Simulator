@@ -26,6 +26,8 @@ class QUBOOptimizer:
         self.variable_map = self._create_variable_map()
         self.edge_demands = self._group_edge_demands()
         self.memory_demands = self._group_memory_demands()
+        self.edge_index = {}
+        self.memory_index = {}
         self.model = self._build_hamiltonian().compile()
 
     def _bundle_review(self):
@@ -41,7 +43,16 @@ class QUBOOptimizer:
     def _undirected_edge(self,edge):
         return tuple(sorted(edge))
 #Edge order is undirected
-
+    @staticmethod
+    def _penalty_for(penalty, resource):
+        """Coefficient for one resource, from a scalar or a resource mapping"""
+        if isinstance(penalty, dict):
+            if resource not in penalty:
+                raise ValueError(
+                    f"Missing penalty coefficient for resource {resource!r}"
+                )
+            return penalty[resource]
+        return penalty
     def _clean_edge_capacities(self, edge_capacities):
         capacities = {}
         for edge, capacity in edge_capacities.items():
@@ -161,18 +172,18 @@ class QUBOOptimizer:
                 label=f"request_{request_id}"
             )
 
-        self.edge_index={}
+        self.edge_index = {}
         for index, (edge,uses) in enumerate(self.edge_demands.items()):
-            self.edge_index[edge]=index
+            self.edge_index[edge] = index
             hamiltonian += self._capacity_term(
                 f"edge_{index}",
                 uses,
                 self.edge_capacities[edge],
                 Placeholder(f"B_{index}")
             )
-        self.memory_index={}
+        self.memory_index = {}
         for index, (node,uses) in enumerate(self.memory_demands.items()):
-            self.memory_index[node]=index
+            self.memory_index[node] = index
             hamiltonian += self._capacity_term(
                 f"memory_{index}",
                 uses,
@@ -270,7 +281,16 @@ class QUBOOptimizer:
         For a capacity-feasible selection the request-conflict penalty (A) is
         identically zero, so only utility, overload, and congestion terms
         contribute---the same convention used by the other solvers.
+
+        ``edge_penalty`` and ``memory_penalty`` accept either a scalar or a
+        per-resource mapping, matching the calibration strategies.
         """
+        if isinstance(edge_penalty, dict):
+            # Match _feed: accept edges in either orientation.
+            edge_penalty = {
+                self._undirected_edge(edge): value
+                for edge, value in edge_penalty.items()
+            }
         selected_map = dict(selected)
         edge_load = defaultdict(int)
         mem_load = defaultdict(int)
@@ -287,12 +307,12 @@ class QUBOOptimizer:
         for e, load in edge_load.items():
             cap = self.edge_capacities.get(e, 0)
             if load > cap:
-                pen += edge_penalty * (load - cap) ** 2
+                pen += self._penalty_for(edge_penalty, e) * (load - cap) ** 2
             pen += congestion_penalty * load * load
         for n, load in mem_load.items():
             cap = self.memory_capacities.get(n, 0)
             if load > cap:
-                pen += memory_penalty * (load - cap) ** 2
+                pen += self._penalty_for(memory_penalty, n) * (load-cap) ** 2
             pen += memory_congestion_penalty * load * load
         return -utility + pen
 
@@ -316,12 +336,40 @@ class QUBOOptimizer:
                     d if memory_penalty is None else memory_penalty)
         return penalty, edge_penalty, memory_penalty
 
-    def _feed(self,penalty, edge_penalty, memory_penalty, congestion_penalty, memory_congestion_penalty):
-        feed={"A": penalty, "C": congestion_penalty, "E": memory_congestion_penalty}
-        for edge, index in self.edge_index.items():
-            feed[f"B_{index}"] = (edge_penalty[edge] if isinstance(edge_penalty, dict) else edge_penalty)
-        for node, index in self.memory_index.items():
-            feed[f"D_{index}"] = (memory_penalty[node] if isinstance(memory_penalty, dict) else memory_penalty)
+    def _resource_feed(self, penalty, index_map, prefix, name):
+        """Expand a scalar or per-resource mapping into placeholder values."""
+        if not isinstance(penalty, dict):
+            return {f"{prefix}{index}": penalty for index in index_map.values()}
+        missing = [resource for resource in index_map if resource not in penalty]
+        if missing:
+            shown = ", ".join(repr(resource) for resource in missing[:5])
+            more = f" (and {len(missing) - 5} more)" if len(missing) > 5 else ""
+            raise ValueError(
+                f"{name} is missing coefficients for {len(missing)} of "
+                f"{len(index_map)} resources: {shown}{more}"
+            )
+        return {
+            f"{prefix}{index}": penalty[resource]
+            for resource, index in index_map.items()
+        }
+
+    def _feed(self, penalty, edge_penalty, memory_penalty,
+              congestion_penalty, memory_congestion_penalty):
+        if isinstance(edge_penalty, dict):
+            # Accept caller-supplied edges in either orientation.
+            edge_penalty = {
+                self._undirected_edge(edge): value
+                for edge, value in edge_penalty.items()
+            }
+        feed = {
+            "A": penalty,
+            "C": congestion_penalty,
+            "E": memory_congestion_penalty,
+        }
+        feed.update(self._resource_feed(
+            edge_penalty, self.edge_index, "B_", "edge_penalty"))
+        feed.update(self._resource_feed(
+            memory_penalty, self.memory_index, "D_", "memory_penalty"))
         return feed
 
     def to_qubo(self, penalty=None, edge_penalty=None, memory_penalty=None,

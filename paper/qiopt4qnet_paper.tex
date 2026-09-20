@@ -52,8 +52,9 @@ request-conditioned reachable-load calibrations for the edge and memory
 capacity penalties that preserve exact ground-state correspondence while
 never exceeding the utility-scale reference bound.  Across 1,080 instances,
 per-resource calibration reduces mean edge and memory coefficients by 49.5\%
-and 46.3\%, with higher mean feasibility and lower repaired reference gaps
-in the 1,078-instance SA/SQA comparison.  Beyond the static formulation we
+and 46.3\%, and in the 1,078-instance SA/SQA comparison raises mean raw
+feasibility by 11.6 and 6.9 percentage points over global calibration
+itself, with correspondingly lower repaired reference gaps.  Beyond the static formulation we
 develop a stochastic reliability framework in which a discrete-event simulator
 executes solver plans under sampled entanglement generation, swap
 failure, T1/T2 decoherence, and fidelity noise.  Within it we (i)
@@ -983,6 +984,16 @@ normalize by that instance's reference, and then average across
 instances, including unchanged cases.  No calibrated capacity
 coefficient exceeded its reference, and $A$ was unchanged.
 
+These two figures measure different quantities.  Because
+$B=\max_e B_e$ by construction, the largest per-resource coefficient
+equals the global coefficient exactly: averaging
+$\max_e B_e/B_{\mathrm{ref}}$ across instances reproduces the global
+values of 4.30\% and 3.01\%.  The larger per-resource reductions
+therefore reflect lowering the non-binding coefficients---on average
+11.0 of 12.4 modeled edge resources and 8.3 of 10.4 memory resources
+per instance---which compresses the coefficient dynamic range of the
+QUBO rather than lowering the binding penalty.
+
 \begin{figure}[tbp]
   \centering
   \includegraphics[width=\columnwidth]{figure2_coefficient_ratios.pdf}
@@ -1009,7 +1020,9 @@ gap evaluation uses unrounded utilities~\cite{perron2023cpsat}.
 Paired effects average the five calls within each instance before
 averaging across instances.  Pointwise 95\% intervals use 10,000
 bootstrap resamples of the 90 generation-seed blocks, keeping their
-associated topologies and request counts together.
+associated topologies and request counts together.  Each comparison's
+resampling seed is derived from the comparison identity, so the
+reported intervals are reproducible across runs.
 
 Relative to conventional calibration, global calibration increased
 mean raw feasibility by 0.41 and 0.71 percentage points (pp) and
@@ -1018,18 +1031,40 @@ SQA, respectively.  Per-resource calibration increased feasibility
 by 12.00 and 7.57 pp and reduced reference gaps by 10.84 and 6.75 pp
 (Fig.~\ref{fig:penalty-solver}).  Mean raw overload, measured as total
 edge-plus-memory excess, decreased by 1.532 resource units for
-per-resource SA and was statistically indistinguishable from zero for per-resource SQA (mean $0.0178$, 95\% CI $[0.000, 0.038]$).
+per-resource SA and was not distinguishable from zero for
+per-resource SQA (mean $0.0178$, 95\% CI
+$[-5.1\times10^{-19}, 0.0381]$).
 
+Because global calibration is itself a reachable-load rule, the
+conventional baseline conflates two effects: adopting reachable-load
+calibration at all, and scoping it per resource.  We therefore also
+report the direct contrast.  Relative to \emph{global} calibration,
+per-resource calibration increased mean raw feasibility by 11.60 pp
+(95\% CI $[10.05, 13.15]$) for SA and 6.86 pp ($[5.15, 8.63]$) for
+SQA, and reduced mean repaired reference gaps by 10.33 pp
+($[9.46, 11.20]$) and 5.95 pp ($[5.35, 6.58]$).  Mean raw overload
+fell by 1.534 resource units ($[1.386, 1.680]$) for SA and rose by
+0.017 units ($[0.0004, 0.0362]$) for SQA.  Nearly all of the effect
+measured against the conventional reference is therefore attributable
+to per-resource scoping rather than to reachable-load calibration as
+such.
+
+We report $3$ contrasts $\times$ $2$ samplers $\times$ $3$ metrics
+$=18$ paired comparisons and apply no multiplicity correction; at the
+nominal 95\% level roughly one interval would be expected to exclude
+zero by chance alone.
 \begin{figure}[tbp]
   \centering
   \includegraphics[width=\columnwidth]{figure3_solver_paired_effects.pdf}
-  \caption{Paired solver effects relative to conventional
-    calibration on 1,078 instances.  Points show mean effects after
-    averaging five matched seeded calls per instance; lines show
-    pointwise 95\% generation-seed block-bootstrap intervals.
-    Left: increase in raw feasibility.  Right: reduction in repaired
-    CP-SAT reference gap.  Both axes use percentage points;
-    positive values favor the alternative calibration.}
+    \caption{Paired solver effects on 1,078 instances for three
+    contrasts: global versus conventional, per-resource versus
+    conventional, and per-resource versus global.  Points show mean
+    effects after averaging five matched seeded calls per instance;
+    lines show pointwise 95\% generation-seed block-bootstrap
+    intervals.  Left: increase in raw feasibility.  Right: reduction
+    in repaired CP-SAT reference gap.  Both axes use percentage
+    points; positive values favor the first calibration named in
+    each contrast.}
   \label{fig:penalty-solver}
 \end{figure}
 
@@ -1836,13 +1871,15 @@ post-processing nicety but a first-class objective.
 
 \paragraph{Penalty calibration.}
 Per-resource weighting retains local bounds that global maxima can
-mask.  The solver comparisons combine local utility bounds,
+mask; the direct per-resource-versus-global contrast isolates this
+effect from reachable-load calibration itself.  The solver comparisons combine local utility bounds,
 redundant-constraint detection, and reachable-load calculations;
 their individual effects on annealing performance were not isolated.
 Despite the average improvements, mean repaired reference gaps
 remained 75.47\% for SA and 22.94\% for SQA.  Per-resource calibration
-also worsened instance-averaged gaps in 24.0\% and 25.6\% of cases,
-respectively.  The uncertainty intervals describe variation across
+also worsened instance-averaged gaps in 24.0\% and 25.6\% of cases
+against conventional calibration, and 23.9\% and 26.0\% against
+global calibration.  The uncertainty intervals describe variation across
 generation seeds for the selected cohort and five fixed solver
 seeds.  Comparisons with other calibration methods and broader
 solver-seed sets remain future work.
@@ -1899,8 +1936,8 @@ QUBO in size and quality, while global and per-resource reachable-load
 calibration preserve ground-state correspondence under the stated
 assumptions.  Per-resource calibration tightens at least one capacity
 coefficient in 99.8\% of benchmark instances and improves mean SA/SQA
-feasibility and repaired reference gaps relative to conventional
-calibration;
+feasibility and repaired reference gaps relative to both conventional
+and global calibration;
 (iii) temporal-memory joint scheduling delivers
 every admitted request within coherence at fidelity $0.30$--$0.51$,
 where a memory-agnostic baseline over-admits; (iv) chance-constrained
