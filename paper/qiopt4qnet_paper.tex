@@ -54,7 +54,8 @@ never exceeding the utility-scale reference bound.  Across 1,080 instances,
 per-resource calibration reduces mean edge and memory coefficients by 49.5\%
 and 46.3\%, and in the 1,078-instance SA/SQA comparison raises mean raw
 feasibility by 11.6 and 6.9 percentage points over global calibration
-itself, with correspondingly lower repaired reference gaps.  Beyond the static formulation we
+itself, with correspondingly lower repaired reference gaps and a small
+increase in raw SQA overload.  Beyond the static formulation we
 develop a stochastic reliability framework in which a discrete-event simulator
 executes solver plans under sampled entanglement generation, swap
 failure, T1/T2 decoherence, and fidelity noise.  Within it we (i)
@@ -1027,7 +1028,12 @@ reported intervals are reproducible across runs.
 Relative to conventional calibration, global calibration increased
 mean raw feasibility by 0.41 and 0.71 percentage points (pp) and
 reduced mean repaired reference gaps by 0.50 and 0.80 pp for SA and
-SQA, respectively.  Per-resource calibration increased feasibility
+SQA, respectively.  The global effect is measured over all 1,078 selected instances, of
+which 951 (88.2\%) have coefficients identical to the conventional
+reference because they were selected on the per-resource criterion and
+therefore contribute exact zeros; restricted to the 127 instances where
+global calibration changed a coefficient, the same effects are
+$+3.46$ pp and $+5.98$ pp for SA and SQA feasibility.  Per-resource calibration increased feasibility
 by 12.00 and 7.57 pp and reduced reference gaps by 10.84 and 6.75 pp
 (Fig.~\ref{fig:penalty-solver}).  Mean raw overload, measured as total
 edge-plus-memory excess, decreased by 1.532 resource units for
@@ -1937,7 +1943,9 @@ calibration preserve ground-state correspondence under the stated
 assumptions.  Per-resource calibration tightens at least one capacity
 coefficient in 99.8\% of benchmark instances and improves mean SA/SQA
 feasibility and repaired reference gaps relative to both conventional
-and global calibration;
+and global calibration, at the cost of a small increase in raw SQA
+overload (mean $0.017$ resource units, 95\% CI $[0.0004, 0.0362]$
+against global);
 (iii) temporal-memory joint scheduling delivers
 every admitted request within coherence at fidelity $0.30$--$0.51$,
 where a memory-agnostic baseline over-admits; (iv) chance-constrained
