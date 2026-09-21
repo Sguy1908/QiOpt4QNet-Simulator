@@ -1036,7 +1036,8 @@ which 951 (88.2\%) have coefficients identical to the conventional
 reference because they were selected on the per-resource criterion and
 therefore contribute exact zeros; restricted to the 127 instances where
 global calibration changed a coefficient, the same effects are
-$+3.46$ pp and $+5.98$ pp for SA and SQA feasibility.  Per-resource calibration increased feasibility
+$+3.46$ pp and $+5.98$ pp for SA and SQA feasibility, with repaired
+reference gaps lower by 4.27 and 6.77 pp.  Per-resource calibration increased feasibility
 by 12.00 and 7.57 pp and reduced reference gaps by 10.84 and 6.75 pp
 (Fig.~\ref{fig:penalty-solver}).  Mean raw overload, measured as total
 edge-plus-memory excess, decreased by 1.532 resource units for
@@ -1059,9 +1060,12 @@ to per-resource scoping rather than to reachable-load calibration as
 such.
 
 We report $3$ contrasts $\times$ $2$ samplers $\times$ $3$ metrics
-$=18$ paired comparisons and apply no multiplicity correction; at the
-nominal 95\% level roughly one interval would be expected to exclude
-zero by chance alone.
+$=18$ paired comparisons, plus 6 for the restricted global contrast
+above (24 in total), and apply no multiplicity correction; at the
+nominal 95\% level roughly one interval in twenty would be expected to
+exclude zero by chance alone.  Intervals reflect variation over
+generated instances only: the five solver seeds are fixed and averaged
+within each instance.
 \begin{figure}[tbp]
   \centering
   \includegraphics[width=\columnwidth]{figure3_solver_paired_effects.pdf}

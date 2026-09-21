@@ -1519,7 +1519,9 @@ reference gap by 0.50 and 0.80 pp.  These means are taken over all
 the conventional reference under the global rule (they were selected on
 the per-resource criterion) and contribute exact zeros.  Restricted to
 the 127 instances where the global rule changed a coefficient, the
-feasibility gains are $+3.46$ pp (SA) and $+5.98$ pp (SQA).  The
+feasibility gains are $+3.46$ pp (SA) and $+5.98$ pp (SQA) and the
+repaired reference gap falls by 4.27 and 6.77 pp (last two rows of
+Table~\ref{tab:calib-paired}).  The
 per-resource rule raises feasibility by 12.00 and 7.57 pp and lowers
 the gap by 10.84 and 6.75 pp (Table~\ref{tab:calib-paired},
 Fig.~\ref{fig:calib-paired}).  Because the global rule is itself a
@@ -1537,7 +1539,9 @@ $-10.33$ and $-5.95$ pp).
     is in resource units (lower is better for gap and overload).  The
     SQA overload interval for per-resource versus conventional has a
     lower bound of $-5\times10^{-19}$ and is described as
-    indistinguishable from zero.}
+    indistinguishable from zero.  The last two rows restrict the global
+    contrast to the 127 instances where the global rule changed a
+    coefficient.}
   \label{tab:calib-paired}
   \footnotesize
   \begin{tabular}{llccc}
@@ -1556,6 +1560,11 @@ $-10.33$ and $-5.95$ pp).
       & $+11.60\ [10.05, 13.15]$ & $-10.33\ [-11.20, -9.46]$ & $-1.5338\ [-1.6796, -1.3855]$ \\
     Per-res.\ $-$ global & SQA
       & $+6.86\ [5.15, 8.63]$ & $-5.95\ [-6.58, -5.35]$ & $+0.0173\ [0.0004, 0.0362]$ \\
+    \midrule
+    Global $-$ conv.\ (127 changed) & SA
+      & $+3.46\ [0.63, 6.56]$ & $-4.27\ [-6.98, -1.94]$ & $+0.0110\ [-0.1687, 0.2276]$ \\
+    Global $-$ conv.\ (127 changed) & SQA
+      & $+5.98\ [1.33, 10.79]$ & $-6.77\ [-9.96, -3.88]$ & $+0.0047\ [-0.0228, 0.0344]$ \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -1571,8 +1580,9 @@ $-10.33$ and $-5.95$ pp).
 \end{figure}
 
 We report $3$ contrasts $\times$ $2$ samplers $\times$ $3$ metrics
-$=18$ paired comparisons and apply no multiplicity correction, so about
-one interval in twenty would be expected to exclude zero by chance.
+$=18$ paired comparisons, plus 6 for the restricted global contrast
+(24 in total), and apply no multiplicity correction, so about one
+interval in twenty would be expected to exclude zero by chance.
 Intervals reflect generation-seed variation over five fixed solver
 seeds only.
 

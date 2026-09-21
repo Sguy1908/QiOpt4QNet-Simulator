@@ -99,3 +99,41 @@ def test_budget_study_records_distinct_samples():
     assert all(1 <= row["n_distinct_samples"] <= row["reads"] for row in rows)
     assert all(row["independent_reads"] for row in rows)
 
+
+
+def test_parallel_run_matches_sequential():
+    from experiments.run_penalty_calibration import _topology_cases
+    from experiments.run_penalty_calibration_budget import run_budget_study_parallel
+
+    triples = [("chain8_c4", 10, 8), ("chain8_c4", 10, 16), ("chain8_c4", 10, 24)]
+    budgets = [(3, None)]
+    sequential = run_budget_study(
+        dict(_topology_cases(True)), triples, budgets, ("sa",), (101,), log=lambda _: None
+    )
+    parallel = run_budget_study_parallel(triples, budgets, ("sa",), (101,), False, 2)
+
+    def key(row):
+        return (row["n_requests"], row["calibration"])
+
+    assert sequential, "expected at least one tightened instance"
+    assert sorted(sequential, key=key) == sorted(parallel, key=key)
+
+
+@pytest.mark.parametrize("sampler", ["sa", "sqa"])
+def test_fixed_seed_reads_are_identical_but_reach_the_solver(sampler):
+    """Documents why extra reads change nothing under a fixed seed.
+
+    docs/PENALTY_CALIBRATION.md relies on this: ``num_reads`` reaches OpenJij
+    (the requested number of samples comes back) but every read is the same
+    state. If this test starts failing, revisit the read-budget discussion.
+    """
+    from experiments.instances import contention_sweep_instances
+
+    inst = contention_sweep_instances(_tiny_topology, [3], seed=10)["req3"]
+    opt = QUBOOptimizer(inst["bundles"], inst["edge_capacities"], inst["memory_capacities"])
+    bqm, _ = build_calibrated_bqm(opt, "conventional")
+
+    for reads in (1, 20, 100):
+        response = draw_reads(sampler, bqm, reads, seed=101)
+        assert len(list(response.samples())) == reads
+        assert count_distinct(response) == 1

@@ -91,7 +91,13 @@ def bootstrap_mean_ci(blocks, seed):
     )
 
 
-def analyze_rows(rows):
+def analyze_rows(rows, contrasts=None, restrict_to=None):
+    """Paired summary rows, one per (contrast, sampler, metric).
+
+    ``restrict_to`` is an optional set of ``(topology, instance_seed,
+    n_requests)`` keys; when given, only those instances are analysed.
+    """
+    contrasts = CONTRASTS if contrasts is None else contrasts
     matched = defaultdict(dict)
 
     for row in rows:
@@ -141,12 +147,14 @@ def analyze_rows(rows):
         instances[key[:-1]][key[-1]] = group
     samples = defaultdict(list)
     for instance_key, seeded_groups in sorted(instances.items()):
+        if restrict_to is not None and instance_key[:3] not in restrict_to:
+            continue
         if set(seeded_groups) != set(SOLVER_SEEDS):
             raise ValueError(f"Incomplete solver-seed: {instance_key}")
 
         sampler = instance_key[-1]
 
-        for treatment, baseline_arm in CONTRASTS:
+        for treatment, baseline_arm in contrasts:
             for metric, column, _ in METRICS:
                 baseline = statistics.fmean(
                     float(group[baseline_arm][column])
@@ -160,7 +168,7 @@ def analyze_rows(rows):
                     (instance_key[1], baseline, calibrated)
                 )
     summary_rows = []
-    for treatment, baseline_arm in CONTRASTS:
+    for treatment, baseline_arm in contrasts:
         for sampler in SAMPLERS:
             for metric, _, lower_is_better in METRICS:
                 records = samples[(treatment, baseline_arm, sampler, metric)]
@@ -262,6 +270,24 @@ def main():
     output_path = os.path.join(results_dir, "heldout_paired_analysis.csv")
     write_csv(output_path, summary)
 
+    # Global rule versus conventional, restricted to the instances where the
+    # global rule actually changed a coefficient. Over all selected instances
+    # most differences are exact zeros (those instances were selected on the
+    # per-resource criterion), which dilutes the mean.
+    global_changed = {
+        (row["topology"], int(row["instance_seed"]), int(row["n_requests"]))
+        for row in scan
+        if float(row["B_ratio"]) < TIGHTENING_TOL
+        or float(row["D_ratio"]) < TIGHTENING_TOL
+    }
+    subset_summary = analyze_rows(
+        rows, contrasts=[CONTRASTS[0]], restrict_to=global_changed
+    )
+    subset_path = os.path.join(
+        results_dir, "heldout_paired_analysis_global_changed.csv"
+    )
+    write_csv(subset_path, subset_summary)
+
     reference = {
         (row["topology"], row["instance_seed"], row["n_requests"]): row
         for row in scan
@@ -315,10 +341,23 @@ def main():
             f"95% CI=[{row['bootstrap_95_ci_low']:+.6f}, "
             f"{row['bootstrap_95_ci_high']:+.6f}]"
         )
+    print()
+    for row in subset_summary:
+        print(
+            f"[global-changed subset, n={row['n_instances']}] "
+            f"{row['difference_definition']:32s} "
+            f"{row['sampler'].upper():3s} "
+            f"{row['metric']:28s} "
+            f"mean={row['mean_paired_difference']:+.6f} "
+            f"95% CI=[{row['bootstrap_95_ci_low']:+.6f}, "
+            f"{row['bootstrap_95_ci_high']:+.6f}]"
+        )
     print(
         f"\n{len(summary)} paired comparisons "
         f"({len(CONTRASTS)} contrasts x {len(SAMPLERS)} samplers "
-        f"x {len(METRICS)} metrics); no multiplicity correction applied."
+        f"x {len(METRICS)} metrics) plus {len(subset_summary)} for the "
+        f"global-changed subset = {len(summary) + len(subset_summary)} in "
+        f"total; no multiplicity correction applied."
     )
     print(f"Wrote {len(summary)} comparisons to {output_path}")
 

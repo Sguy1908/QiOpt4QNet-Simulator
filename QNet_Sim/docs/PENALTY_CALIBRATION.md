@@ -110,10 +110,26 @@ Outputs: `results/penalty_calibration/budget_sensitivity_runs.csv` and
 `budget_sensitivity_summary.csv`. Each run row records `n_samples`, the number of
 samples OpenJij actually returned, and the summary column `samples_match_reads`
 is `True` only if it equals the requested reads in every row. This makes a
-budget that fails to reach the solver visible. If effects are then equal across
-read counts, the parameter was not ignored; the explanation offered in the
-discussion of PR #20 is that greedy repair saturates. `solve_sa` accepts an
-optional `num_sweeps`.
+budget that fails to reach the solver visible. `solve_sa` accepts an optional
+`num_sweeps`.
+
+**`num_reads` does reach the solver, but with a fixed seed the reads are
+identical.** For both SA and SQA, requesting 1, 100 or 1000 reads returns
+exactly that many samples (`n_samples == reads`), and in every case checked
+(chain8 and grid3x3 instances, `seed=101`) the returned samples are a single
+distinct state (`n_distinct_samples == 1`). The earlier observation that 100 and
+1000 reads give identical effects is therefore explained by the seeded call
+returning the same read repeatedly, not by the read count being ignored and not
+(as suggested in the discussion of PR #20) by greedy repair saturating. It
+also explains why every archived call in the held-out solver study is uniformly
+feasible or uniformly infeasible (`raw_feasible_rate` is 0 or 1; the analysis
+asserts this): a "100-read" call is one sample per solver seed. Within-call
+reads are not independent replicates, and the read budget in the held-out study
+is not a budget in the usual sense. `--independent-reads` draws each read as
+its own call with its own seed (`seed, seed+1, ...`), which makes extra reads
+real but is slow: a single-read call costs about `17` ms on a 65-variable
+instance and about `230` ms on a 209-variable one, so 1000 independent reads
+take roughly `17` s and `230` s respectively.
 
 Do not quote a small-sample magnitude as the effect size: the PR #20 discussion
 reports about `-16` pp for the repaired-gap effect on a 40-instance subsample,
@@ -226,9 +242,15 @@ against the **global** rule rather than against the conventional reference:
 - `resource_aware_per - conventional`;
 - `resource_aware_per - resource_aware`.
 
-That gives `3 contrasts x 2 samplers x 3 metrics = 18` comparisons. **No
-multiplicity correction is applied**, so roughly one interval in twenty would be
-expected to exclude zero by chance alone.
+That gives `3 contrasts x 2 samplers x 3 metrics = 18` comparisons. The
+restricted analysis below adds `1 contrast x 2 samplers x 3 metrics = 6` more,
+for `24` in total. **No multiplicity correction is applied**, so roughly one
+interval in twenty would be expected to exclude zero by chance alone.
+
+The five solver seeds are fixed and averaged within each instance, so the
+intervals reflect variation over generated instances (resampled as
+generation-seed blocks) only, not over solver seeds. The percentile bootstrap
+uses 10,000 resamples of the 90 generation-seed blocks.
 
 Intervals are percentile bootstrap CIs over 10,000 resamples. Resampling is at
 the level of **instance-seed blocks** rather than individual instances, so
@@ -256,6 +278,47 @@ distinguishable from zero: `resource_aware_per - conventional` on SQA raw
 overload units has a CI lower bound of `-5.1e-19`, which straddles zero at
 floating-point resolution and should be described as indistinguishable rather
 than significant.
+
+### Global rule restricted to instances where it changed a coefficient
+
+The pooled global-versus-conventional effect above is averaged over all 1,078
+selected instances, of which `951` (`88.2%`) have coefficients identical to the
+conventional reference (they were selected on the per-resource criterion) and so
+contribute exact zeros. The same contrast restricted to the `127` instances
+where the global rule tightened `B` or `D`
+(`heldout_paired_analysis_global_changed.csv`, written by the same script):
+
+| sampler | metric | mean difference | 95% CI |
+| --- | --- | --- | --- |
+| SA | raw feasible rate | `+0.0346` | `[+0.0063, +0.0656]` |
+| SA | repaired reference gap | `-4.27 pp` | `[-6.98, -1.94]` |
+| SA | raw overload units | `+0.0110` | `[-0.1687, +0.2276]` |
+| SQA | raw feasible rate | `+0.0598` | `[+0.0133, +0.1079]` |
+| SQA | repaired reference gap | `-6.77 pp` | `[-9.96, -3.88]` |
+| SQA | raw overload units | `+0.0047` | `[-0.0228, +0.0344]` |
+
+So the global rule does help where it does something (`+3.5` and `+6.0` pp raw
+feasibility for SA and SQA), and the pooled `+0.41` / `+0.71` pp is that effect
+diluted by instances it never touched. Even here the per-resource gain against
+the global rule is larger (`+11.6` / `+6.9` pp pooled).
+
+**Why the earlier 139-instance analysis found no benefit.** The superseded
+artifact (commit `3e6536a`) reported a raw-feasibility change of `-1.3` pp for SA
+under the global rule. It is not comparable to the current results, for three
+reasons that can be checked from the archived CSVs:
+
+1. *Different instance set.* It selected `139` instances, of which only `46` are
+   among today's `127`. The B/D ratios in the two scan artifacts differ on `220`
+   of the same `1,080` instances, i.e. the calibration itself changed.
+2. *Dilution.* The current pooled figure includes `951` instances with a zero
+   difference by construction.
+3. *Run-to-run variability.* Re-evaluating the same `139` instances with the
+   current code gives `+1.3` pp for SA raw feasibility (`+0.29` pp for SQA,
+   against `-0.43` pp archived): the sign flips. The conventional arm's raw
+   feasibility also differs from the archived run in `311` of `1,390`
+   (instance, sampler, seed) cells, although its coefficients are unchanged. A
+   `1` pp effect on `139` instances, with one distinct sample per call, is within
+   that variability. The cause of the run-to-run differences was not isolated.
 
 ### Reachable-load mechanism analysis
 

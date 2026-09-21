@@ -21,7 +21,7 @@ disagree, the generator is authoritative.
 | `experiments/parasitic_*.csv`, `experiments/figures/parasitic_*.png` | `python experiments/run_parasitic_emission.py` |
 | `experiments/figures/*.png`, `experiments/figures/summary_tables.txt` | `PYTHONPATH=src python src/experiments/plot_results.py` (reads the CSVs above) |
 | `penalty_calibration/heldout_coefficient_scan.csv`, `heldout_tightening_solver_*.csv` | `PYTHONPATH=src python src/experiments/run_penalty_calibration_heldout.py` (`--scan-only` for the scan alone) |
-| `penalty_calibration/heldout_paired_analysis.csv` | `PYTHONPATH=src python src/experiments/analyze_penalty_calibration_heldout.py` |
+| `penalty_calibration/heldout_paired_analysis.csv`, `heldout_paired_analysis_global_changed.csv` | `PYTHONPATH=src python src/experiments/analyze_penalty_calibration_heldout.py` |
 | `penalty_calibration/heldout_mechanism_analysis.csv` | `PYTHONPATH=src python src/experiments/analyze_penalty_calibration_mechanism.py` |
 | `penalty_calibration/figures/figure*.pdf`, `.png` | `PYTHONPATH=src python src/experiments/plot_penalty_calibration_heldout.py` |
 
@@ -30,8 +30,10 @@ disagree, the generator is authoritative.
 cannot currently be regenerated. `time_dependent_optimizer.py` has a
 `risk_gain` parameter and is the likely origin; it has not been confirmed.
 
-`run_penalty_calibration_budget.py` prints its results and does not write into
-this directory.
+`run_penalty_calibration_budget.py` writes `penalty_calibration/budget_sensitivity_runs.csv`
+and `budget_sensitivity_summary.csv` (solver-budget sensitivity; see
+`docs/PENALTY_CALIBRATION.md`). It is slow; `--workers N` splits the instances
+across processes.
 
 ## Policy for committed binaries
 

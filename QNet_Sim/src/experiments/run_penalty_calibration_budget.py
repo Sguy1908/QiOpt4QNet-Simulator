@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import multiprocessing
 import os
 import random
 import statistics
@@ -187,8 +188,58 @@ def run_budget_study(
     return rows
 
 
-def summarize(rows, n_boot=2000, seed=0):
-    """Paired per-resource minus conventional effect per budget, with bootstrap CIs."""
+def _run_shard(job):
+    """Pool worker: rebuild the topologies (lambdas do not pickle) and run a shard."""
+    triples, budgets, samplers, solver_seeds, independent_reads = job
+    topologies = dict(_topology_cases(True))
+    return run_budget_study(
+        topologies, triples, budgets, samplers, solver_seeds,
+        independent_reads=independent_reads,
+        log=lambda message: print(message, flush=True),
+    )
+
+
+def run_budget_study_parallel(
+    triples, budgets, samplers, solver_seeds, independent_reads, workers
+):
+    """``run_budget_study`` over interleaved shards of ``triples``.
+
+    Rows do not depend on the shard layout: every call is seeded by
+    ``solver_seed`` alone. Shards are interleaved so each gets a similar mix of
+    topologies and request counts.
+    """
+    shards = [triples[i::workers] for i in range(workers)]
+    jobs = [
+        (shard, budgets, samplers, solver_seeds, independent_reads)
+        for shard in shards
+        if shard
+    ]
+    with multiprocessing.get_context("spawn").Pool(len(jobs)) as pool:
+        results = pool.map(_run_shard, jobs, chunksize=1)
+    return [row for shard_rows in results for row in shard_rows]
+
+
+def block_bootstrap_ci(values_by_block, rng, n_boot):
+    """Percentile CI for the mean over instances, resampling whole seed blocks.
+
+    Same design as ``analyze_penalty_calibration_heldout.bootstrap_mean_ci``:
+    instances generated from one held-out seed stay together, and the
+    statistic is the ratio of sums, i.e. the overall mean difference.
+    """
+    totals = np.array([sum(v) for v in values_by_block.values()], dtype=float)
+    counts = np.array([len(v) for v in values_by_block.values()], dtype=float)
+    picks = rng.integers(0, len(totals), size=(n_boot, len(totals)))
+    boots = totals[picks].sum(axis=1) / counts[picks].sum(axis=1)
+    return tuple(float(x) for x in np.percentile(boots, [2.5, 97.5]))
+
+
+def summarize(rows, n_boot=10000, seed=0):
+    """Paired per-resource minus conventional effect per budget, with bootstrap CIs.
+
+    Intervals resample generation-seed blocks (``instance_seed``), not single
+    instances, and reflect variation over generated instances only: the solver
+    seeds are a small fixed set averaged within each instance.
+    """
     per_key = defaultdict(lambda: defaultdict(list))
     for row in rows:
         key = (row["sampler"], row["reads"], row["sweeps"])
@@ -200,6 +251,7 @@ def summarize(rows, n_boot=2000, seed=0):
     for key, cells in sorted(per_key.items(), key=lambda kv: str(kv[0])):
         instances = sorted({inst for inst, _ in cells})
         diffs = {"raw_feasible_rate": [], "repaired_gap_pct": []}
+        blocks = {metric: defaultdict(list) for metric in diffs}
         for inst in instances:
             conv = cells.get((inst, "conventional"))
             per = cells.get((inst, "resource_aware_per"))
@@ -209,11 +261,13 @@ def summarize(rows, n_boot=2000, seed=0):
                 c = statistics.fmean(r[metric] for r in conv)
                 p = statistics.fmean(r[metric] for r in per)
                 diffs[metric].append(p - c)
+                blocks[metric][inst[1]].append(p - c)
         n = len(diffs["raw_feasible_rate"])
         if n == 0:
             continue
         record = {
             "sampler": key[0], "reads": key[1], "sweeps": key[2], "n_instances": n,
+            "n_seed_blocks": len(blocks["raw_feasible_rate"]),
             "samples_match_reads": all(
                 r["n_samples"] == r["reads"] for c in cells.values() for r in c
             ),
@@ -223,8 +277,7 @@ def summarize(rows, n_boot=2000, seed=0):
         }
         for metric, values in diffs.items():
             arr = np.asarray(values, dtype=float)
-            boots = rng.choice(arr, size=(n_boot, n)).mean(axis=1)
-            lo, hi = np.percentile(boots, [2.5, 97.5])
+            lo, hi = block_bootstrap_ci(blocks[metric], rng, n_boot)
             record[f"{metric}_mean_diff"] = float(arr.mean())
             record[f"{metric}_ci_low"] = float(lo)
             record[f"{metric}_ci_high"] = float(hi)
@@ -252,6 +305,10 @@ def main(argv=None):
         help="draw every read as its own seeded call (fixed-seed reads are identical)",
     )
     parser.add_argument(
+        "--workers", type=int, default=1,
+        help="processes to split the instances across (results do not depend on it)",
+    )
+    parser.add_argument(
         "--out-dir",
         default=os.path.abspath(
             os.path.join(os.path.dirname(__file__), "..", "..", "results", "penalty_calibration")
@@ -267,10 +324,19 @@ def main(argv=None):
     budgets = [(reads, None) for reads in args.reads]
     budgets += [(min(args.reads), sweeps) for sweeps in args.sweeps]
 
-    rows = run_budget_study(
-        topologies, triples, budgets, tuple(args.samplers), tuple(args.solver_seeds),
-        independent_reads=args.independent_reads,
-    )
+    if args.workers > 1:
+        rows = run_budget_study_parallel(
+            triples, budgets, tuple(args.samplers), tuple(args.solver_seeds),
+            args.independent_reads, args.workers,
+        )
+    else:
+        rows = run_budget_study(
+            topologies, triples, budgets, tuple(args.samplers), tuple(args.solver_seeds),
+            independent_reads=args.independent_reads,
+        )
+    rows.sort(key=lambda r: (r["topology"], r["instance_seed"], r["n_requests"],
+                             r["calibration"], r["sampler"], r["reads"],
+                             str(r["sweeps"]), r["solver_seed"]))
     summary = summarize(rows)
 
     os.makedirs(args.out_dir, exist_ok=True)
