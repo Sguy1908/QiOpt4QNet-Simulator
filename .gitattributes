@@ -1,0 +1,3 @@
+# Generated binaries: never attempt text diffs or line-ending conversion.
+*.pdf binary
+*.png binary
