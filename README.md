@@ -39,38 +39,6 @@ Two dict views are used depending on how much detail a solver needs:
 - `Bundle.to_dict()` — the full set, additionally including `fidelity`,
   `success_probability`, `latency`, `bell_pair_cost`, `purification_rounds`
 
-## Pipeline
-
-topology.generate_*() -> QuantumNetwork
-|
-requests: list[Request] (baselines/request_generator.py, or built by hand)
-|
-PathGenerator / CandidatePathGenerator
--> candidate paths per request
-|
-BundleGenerator.generate_bundles(request, candidate_paths)
--> list[Bundle] (one per path x purification-level combination)
-|
-[b.to_optimizer_dict() for b in bundles], edge_capacities, memory_capacities
-|
-v
-┌─────────────────────────────┬──────────────────────────────┐
-│ optimization/ │ baselines/ │
-│ - QUBOOptimizer (pyqubo) │ - 8 classical allocators │
-│ - MetropolisAnnealer │ - CPSATAllocator (exact) │
-│ - TensorNetworkOptimizer │ - BundleRankingModel (ML) │
-│ - OpenJij SA / SQA sampler │ │
-└─────────────────────────────┴──────────────────────────────┘
-|
-result: {"selected": [(request_id, bundle_id), ...], "total_utility": ...}
-|
-baselines/feasibility.py: compute_metrics() / compare_all() / print_comparison()
-
-
-Every solver — quantum or classical — returns the same
-`{"selected": [...], "total_utility": ...}` shape, so any of them can be
-dropped into `baselines/feasibility.py`'s comparison tooling interchangeably.
-
 ## Installation
 
 ```bash
