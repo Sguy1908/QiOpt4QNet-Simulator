@@ -131,6 +131,29 @@ real but is slow: a single-read call costs about `17` ms on a 65-variable
 instance and about `230` ms on a 209-variable one, so 1000 independent reads
 take roughly `17` s and `230` s respectively.
 
+**Full-cohort result (independent reads).** Run on all 1,078 selected
+instances with SA, independent reads, solver seeds `101` and `202`, and
+per-resource minus conventional as the contrast (`--full --reads 10 100
+--sweeps 10000 --independent-reads --solver-seeds 101 202`, about 2.4 hours on
+8 processes). `samples_match_reads` is `True` in every row.
+
+| SA budget | raw feasible rate | repaired gap | worse in |
+| --- | --- | --- | --- |
+| 10 reads, default sweeps | `+10.54 pp` `[+9.37, +11.72]` | `-13.16 pp` `[-14.14, -12.17]` | `22.6%` |
+| 100 reads, default sweeps | `+10.50 pp` `[+9.49, +11.50]` | `-13.06 pp` `[-14.16, -11.98]` | `22.6%` |
+| 10 reads, 10,000 sweeps | `+13.17 pp` `[+12.02, +14.34]` | `-15.83 pp` `[-17.14, -14.56]` | `23.9%` |
+
+Intervals are 10,000-resample generation-seed-block bootstrap intervals over 90
+blocks. A tenfold larger read budget leaves the per-resource advantage
+unchanged (`-13.2` vs `-13.1` pp), and a tenfold larger sweep budget increases
+it (`-15.8` pp), so the benefit is not compensation for an under-budgeted
+annealer. Two limits: SA only (SQA was not run), and two solver seeds. This
+protocol measures a larger effect than the fixed-seed study (`-10.8` pp against
+conventional), which is expected because independent reads give the annealer
+distinct samples to choose among. The earlier `-16` pp figure from a
+40-instance subsample was neither this nor the fixed-seed effect and should not
+be quoted.
+
 Do not quote a small-sample magnitude as the effect size: the PR #20 discussion
 reports about `-16` pp for the repaired-gap effect on a 40-instance subsample,
 against `-10.8` pp on the full cohort.
