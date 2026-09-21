@@ -20,9 +20,11 @@ from typing import Dict, Mapping, Optional
 import openjij as oj
 
 
-def solve_sa(bqm, num_reads, seed=None):
+def solve_sa(bqm, num_reads, seed=None, num_sweeps=None):
+    """Simulated annealing; ``num_sweeps=None`` keeps the OpenJij default."""
     sampler = oj.SASampler()
-    return sampler.sample(bqm, num_reads=num_reads, seed=seed)
+    kwargs = {} if num_sweeps is None else {"num_sweeps": int(num_sweeps)}
+    return sampler.sample(bqm, num_reads=num_reads, seed=seed, **kwargs)
 
 
 def solve_sqa(bqm, num_reads, seed=None):

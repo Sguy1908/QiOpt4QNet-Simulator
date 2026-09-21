@@ -84,10 +84,40 @@ results/penalty_calibration/calibration_runs.csv
 results/penalty_calibration/calibration_summary.csv
 ```
 
-Note that this driver runs the `conventional` and `resource_aware` strategies
-only. Adding `resource_aware_per` to its strategy list also requires wrapping
-its `coeffs["B"]` / `coeffs["D"]` CSV fields in `coefficient_stats()`, because
-those coefficients are mappings rather than scalars.
+By default this driver runs the `conventional` and `resource_aware` strategies.
+Add the per-resource rule with `--strategies conventional resource_aware
+resource_aware_per`. For mapping-valued coefficients the `B` / `D` columns hold
+the mean over resources, alongside `B_min`, `B_max`, `B_n` (and likewise for
+`D`); for scalar coefficients `min = max = mean` and `n = 1`.
+
+## Solver-budget sensitivity
+
+To check that the per-resource advantage is not just compensating for an
+under-budgeted annealer, `run_penalty_calibration_budget.py` reruns matched
+conventional and per-resource QUBOs at several budgets (reads, and SA sweeps)
+and reports paired per-resource-minus-conventional effects with bootstrap
+intervals:
+
+```bash
+# about 40 randomly sampled held-out instances (slow: minutes to hours)
+PYTHONPATH=src python3 src/experiments/run_penalty_calibration_budget.py
+
+# every held-out instance selected by the per-resource criterion
+PYTHONPATH=src python3 src/experiments/run_penalty_calibration_budget.py --full
+```
+
+Outputs: `results/penalty_calibration/budget_sensitivity_runs.csv` and
+`budget_sensitivity_summary.csv`. Each run row records `n_samples`, the number of
+samples OpenJij actually returned, and the summary column `samples_match_reads`
+is `True` only if it equals the requested reads in every row. This makes a
+budget that fails to reach the solver visible. If effects are then equal across
+read counts, the parameter was not ignored; the explanation offered in the
+discussion of PR #20 is that greedy repair saturates. `solve_sa` accepts an
+optional `num_sweeps`.
+
+Do not quote a small-sample magnitude as the effect size: the PR #20 discussion
+reports about `-16` pp for the repaired-gap effect on a 40-instance subsample,
+against `-10.8` pp on the full cohort.
 
 ## Metrics that matter
 
@@ -243,29 +273,29 @@ bound.
 For edge constraints, the mean fraction of eligible bundle/resource pairs with
 `delta = 1` increased with request count:
 
-- `n = 8`: `75.32%`;
-- `n = 16`: `90.93%`;
-- `n = 24`: `96.95%`.
+- `n = 8`: `67.76%`;
+- `n = 16`: `88.32%`;
+- `n = 24`: `95.39%`.
 
 For memory constraints:
 
-- `n = 8`: `57.75%`;
-- `n = 16`: `83.71%`;
-- `n = 24`: `94.13%`.
+- `n = 8`: `48.00%`;
+- `n = 16`: `78.03%`;
+- `n = 24`: `90.37%`.
 
 At the same time, strict global coefficient tightening decreased sharply.
 
 For `B`:
 
-- `n = 8`: `26.11%` of instances;
-- `n = 16`: `8.61%`;
-- `n = 24`: `2.22%`.
+- `n = 8`: `24.17%` of instances;
+- `n = 16`: `6.94%`;
+- `n = 24`: `2.50%`.
 
 For `D`:
 
-- `n = 8`: `12.50%`;
-- `n = 16`: `0.83%`;
-- `n = 24`: `0.28%`.
+- `n = 8`: `16.67%`;
+- `n = 16`: `1.94%`;
+- `n = 24`: `0.00%`.
 
 The most direct saturation diagnostic is whether a maximum-utility bundle
 (`P0`) also has a realizable `delta = 1` case. Such a pair contributes
@@ -274,12 +304,14 @@ scale.
 
 The observed `P0`-pin frequencies were:
 
-- edge: `73.89%`, `91.39%`, and `97.78%` for
+- edge: `75.28%`, `93.06%`, and `97.50%` for
   `n = 8, 16, 24`, respectively;
-- memory: `87.50%`, `99.17%`, and `99.72%`.
+- memory: `82.78%`, `98.06%`, and `100.00%`.
 
-Within each request-count/family group, the `P0`-pin frequency was the exact
-complement of the strict-tightening frequency. The held-out data therefore
+Within each request-count/family group, the `P0`-pin frequency and the
+strict-tightening frequency sum to `100%` for `n = 16` and `n = 24`, and to
+`99.4%` for `n = 8` (two instances per family are neither pinned nor
+tightened). The held-out data therefore
 directly support the predicted saturation mechanism: increasing request count
 makes unit penalty drops increasingly reachable, which progressively removes
 the opportunity for **global** coefficient tightening. Per-resource calibration

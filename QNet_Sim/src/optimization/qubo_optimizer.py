@@ -42,6 +42,25 @@ class QUBOOptimizer:
     
     def _undirected_edge(self,edge):
         return tuple(sorted(edge))
+
+    def _normalize_edge_penalty(self, edge_penalty):
+        """Re-key a per-edge mapping by undirected edge.
+
+        Raises if two keys name the same edge in opposite orientations, since
+        one coefficient would otherwise silently overwrite the other.
+        """
+        if not isinstance(edge_penalty, dict):
+            return edge_penalty
+        normalized = {}
+        for edge, value in edge_penalty.items():
+            key = self._undirected_edge(edge)
+            if key in normalized:
+                raise ValueError(
+                    f"edge_penalty has more than one entry for undirected "
+                    f"edge {key!r}"
+                )
+            normalized[key] = value
+        return normalized
 #Edge order is undirected
     @staticmethod
     def _penalty_for(penalty, resource):
@@ -285,12 +304,8 @@ class QUBOOptimizer:
         ``edge_penalty`` and ``memory_penalty`` accept either a scalar or a
         per-resource mapping, matching the calibration strategies.
         """
-        if isinstance(edge_penalty, dict):
-            # Match _feed: accept edges in either orientation.
-            edge_penalty = {
-                self._undirected_edge(edge): value
-                for edge, value in edge_penalty.items()
-            }
+        # Match _feed: accept edges in either orientation.
+        edge_penalty = self._normalize_edge_penalty(edge_penalty)
         selected_map = dict(selected)
         edge_load = defaultdict(int)
         mem_load = defaultdict(int)
@@ -340,6 +355,14 @@ class QUBOOptimizer:
         """Expand a scalar or per-resource mapping into placeholder values."""
         if not isinstance(penalty, dict):
             return {f"{prefix}{index}": penalty for index in index_map.values()}
+        unknown = [resource for resource in penalty if resource not in index_map]
+        if unknown:
+            shown = ", ".join(repr(resource) for resource in unknown[:5])
+            more = f" (and {len(unknown) - 5} more)" if len(unknown) > 5 else ""
+            raise ValueError(
+                f"{name} has coefficients for {len(unknown)} unknown "
+                f"resources: {shown}{more}"
+            )
         missing = [resource for resource in index_map if resource not in penalty]
         if missing:
             shown = ", ".join(repr(resource) for resource in missing[:5])
@@ -355,12 +378,8 @@ class QUBOOptimizer:
 
     def _feed(self, penalty, edge_penalty, memory_penalty,
               congestion_penalty, memory_congestion_penalty):
-        if isinstance(edge_penalty, dict):
-            # Accept caller-supplied edges in either orientation.
-            edge_penalty = {
-                self._undirected_edge(edge): value
-                for edge, value in edge_penalty.items()
-            }
+        # Accept caller-supplied edges in either orientation.
+        edge_penalty = self._normalize_edge_penalty(edge_penalty)
         feed = {
             "A": penalty,
             "C": congestion_penalty,

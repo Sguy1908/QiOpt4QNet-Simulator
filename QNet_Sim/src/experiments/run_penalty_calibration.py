@@ -337,6 +337,7 @@ def run_benchmark(
     num_reads: int = 50,
     congestion_penalty: float = 0.0,
     memory_congestion_penalty: float = 0.0,
+    strategies: Sequence[str] = ("conventional", "resource_aware"),
 ) -> List[dict]:
     os.makedirs(out_dir, exist_ok=True)
 
@@ -344,7 +345,7 @@ def run_benchmark(
     solver_seeds = [101, 202, 303] if full else [101]
     request_counts = [8, 16, 24] if full else [8, 16]
     scales = [0.25, 0.5, 1.0, 2.0, 4.0]
-    strategies = ["conventional", "resource_aware"]
+    strategies = list(strategies)
     samplers = ["sa", "sqa"]
 
     rows: List[dict] = []
@@ -411,6 +412,9 @@ def run_benchmark(
                                     mem_caps,
                                 )
 
+                                b_stats = coefficient_stats(coeffs["B"])
+                                d_stats = coefficient_stats(coeffs["D"])
+
                                 row = {
                                     "topology": topology_name,
                                     "instance": instance_name,
@@ -423,9 +427,17 @@ def run_benchmark(
                                     "calibration": strategy,
                                     "coefficient_scale": scale,
                                     "A": coeffs["A"],
-                                    "B": coeffs["B"],
+                                    # B/D are mappings under resource_aware_per;
+                                    # "B"/"D" hold the mean over resources.
+                                    "B": b_stats["mean"],
+                                    "B_min": b_stats["min"],
+                                    "B_max": b_stats["max"],
+                                    "B_n": b_stats["n"],
                                     "C": coeffs["C"],
-                                    "D": coeffs["D"],
+                                    "D": d_stats["mean"],
+                                    "D_min": d_stats["min"],
+                                    "D_max": d_stats["max"],
+                                    "D_n": d_stats["n"],
                                     "E": coeffs["E"],
                                     "oracle_utility": oracle_utility,
                                     "oracle_optimal": oracle_optimal,
@@ -462,6 +474,19 @@ def run_benchmark(
     print(f"\nWrote {len(rows)} run rows to {run_path}")
     print(f"Wrote {len(summary)} summary rows to {summary_path}")
     return rows
+
+
+def coefficient_stats(value) -> dict:
+    """Summarise a scalar or per-resource coefficient for CSV output."""
+    if isinstance(value, dict):
+        values = list(value.values()) or [0.0]
+        return {
+            "mean": statistics.fmean(values),
+            "min": min(values),
+            "max": max(values),
+            "n": len(values),
+        }
+    return {"mean": value, "min": value, "max": value, "n": 1}
 
 
 def _write_csv(path: str, rows: Sequence[dict]):
@@ -541,6 +566,12 @@ def main():
         default=0.0,
         help="Soft memory-congestion E. Keep at zero for the clean calibration ablation.",
     )
+    parser.add_argument(
+        "--strategies",
+        nargs="+",
+        default=["conventional", "resource_aware"],
+        help="Calibration strategies to run, e.g. add resource_aware_per.",
+    )
     args = parser.parse_args()
 
     run_benchmark(
@@ -549,6 +580,7 @@ def main():
         num_reads=args.reads,
         congestion_penalty=args.congestion_penalty,
         memory_congestion_penalty=args.memory_congestion_penalty,
+        strategies=args.strategies,
     )
 
 
