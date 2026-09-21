@@ -19,7 +19,7 @@ import math
 import os
 import statistics
 
-from experiments.instances import contention_sweep_instances
+from experiments.instances import contention_sweep_instances, instance_key
 from experiments.run_penalty_calibration import _topology_cases
 from experiments.run_penalty_calibration_heldout import (
     INSTANCE_SEEDS,
@@ -224,7 +224,7 @@ def main():
 
             for n_requests in REQUEST_COUNTS:
                 instance_name = f"req{n_requests}"
-                inst = instances[instance_name]
+                inst = instances[instance_key(n_requests)]
 
                 bundles = inst["bundles"]
 

@@ -23,7 +23,7 @@ import sys
 import time
 from collections import defaultdict
 
-from experiments.instances import contention_sweep_instances
+from experiments.instances import contention_sweep_instances, instance_key
 from experiments.run_penalty_calibration import (
     _gap_pct,
     coefficient_stats,
@@ -153,7 +153,7 @@ def main():
 
             for n_requests in REQUEST_COUNTS:
                 instance_name = f"req{n_requests}"
-                inst = instances[instance_name]
+                inst = instances[instance_key(n_requests)]
 
                 bundles = inst["bundles"]
 
@@ -272,14 +272,12 @@ def main():
     ]
 
     mean_b_reduction = statistics.fmean(
-        1.0 - row["B_ratio"]
-        for row in b_tight_rows
-    )
+        [1.0 - row["B_ratio"] for row in b_tight_rows]
+    ) if b_tight_rows else math.nan
 
     mean_d_reduction = statistics.fmean(
-        1.0 - row["D_ratio"]
-        for row in d_tight_rows
-    )
+        [1.0 - row["D_ratio"] for row in d_tight_rows]
+    ) if d_tight_rows else math.nan
 
     print()
     print("Held-out coefficient scan")
@@ -329,7 +327,7 @@ def main():
         )
 
         instance_name = f"req{n_requests}"
-        inst = instances[instance_name]
+        inst = instances[instance_key(n_requests)]
 
         bundles = inst["bundles"]
         edge_caps = inst["edge_capacities"]
