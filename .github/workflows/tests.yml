@@ -1,0 +1,65 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: QNet_Sim
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff==0.15.6
+      # Enforced everywhere: syntax errors and undefined names (see [tool.ruff]).
+      - name: ruff check
+        run: ruff check .
+      # The existing code base is not ruff-formatted, and reformatting it in one
+      # go would bury real changes. Files added by a pull request must be
+      # formatted; the rest is reported for information only.
+      - name: ruff format (new files must be formatted)
+        if: github.event_name == 'pull_request'
+        run: |
+          git diff --name-only --diff-filter=A \
+            "origin/${{ github.base_ref }}...HEAD" -- '*.py' \
+            | sed 's|^QNet_Sim/||' > /tmp/new_files.txt
+          cat /tmp/new_files.txt
+          if [ -s /tmp/new_files.txt ]; then
+            xargs ruff format --check < /tmp/new_files.txt
+          fi
+      - name: ruff format (informational, whole tree)
+        run: ruff format --check . || true
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            QNet_Sim/pyproject.toml
+      # The suite imports the optional baselines (torch, ortools, scikit-learn)
+      # unconditionally, so CI installs the `all` extra rather than skipping.
+      # CPU-only torch first keeps the environment small; pip then sees the
+      # `torch>=2.0` requirement as already satisfied.
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: pip install tomli
+      - name: Install dependencies from pyproject.toml
+        run: python .github/scripts/pyproject_deps.py all > /tmp/requirements-ci.txt && pip install -r /tmp/requirements-ci.txt
+      - name: pytest
+        working-directory: QNet_Sim
+        run: python -m pytest -q
