@@ -98,6 +98,12 @@ def generate_grid_topology(rows: int, cols: int, edge_capacity: int = 6, memory_
     }
 
 
+def instance_key(n_requests: int) -> str:
+    """Key under which contention_sweep_instances() stores the workload with
+    ``n_requests`` requests. Use this instead of formatting the key by hand."""
+    return f"req{n_requests}"
+
+
 def contention_sweep_instances(topology_fn: Callable[[], dict], request_counts: Sequence[int],
                                 seed: int, k_paths: int = 3) -> Dict[str, dict]:
     """For each request count, builds a *fresh* network from topology_fn(),
@@ -123,7 +129,7 @@ def contention_sweep_instances(topology_fn: Callable[[], dict], request_counts: 
             candidate_paths = path_gen.generate_candidates(req, k=k_paths)
             bundles.extend(bundle_gen.generate_bundles(req, candidate_paths))
 
-        out[f"req{n_requests}"] = {
+        out[instance_key(n_requests)] = {
             "bundles": [b.to_dict() for b in bundles],
             "edge_capacities": dict(topo["edge_capacities"]),
             "memory_capacities": dict(topo["memory_capacities"]),
