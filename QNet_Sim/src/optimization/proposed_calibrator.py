@@ -47,22 +47,24 @@ def possible_loads(
     excluded_request: str,
     *,
     capacity: int | None = None,
-    candidate_demand: int | None = None,
 ) -> set[int]:
     """Return reachable resource loads from all requests except one.
 
-    If ``capacity`` and ``candidate_demand`` are supplied, dynamic programming
-    is safely capped. To find the smallest load capable of causing a violation,
-    no load above ``capacity + max_competing_single_request_demand`` is needed.
+    If ``capacity`` is supplied, dynamic programming is safely capped. The
+    smallest reachable load that overflows the capacity once a candidate of
+    demand ``d`` is added is at most ``capacity - d + max_step`` (its last
+    addend is at most ``max_step`` and every shorter partial sum is itself a
+    reachable load), so no load above ``capacity + max_step`` is needed for any
+    candidate. The capped result therefore does not depend on the candidate,
+    which is what allows callers to cache it per excluded request.
     """
     grouped = _demands_by_request(key_demand_pairs, excluded_request)
 
     load_cap = None
-    if capacity is not None and candidate_demand is not None:
+    if capacity is not None:
         capacity = int(capacity)
-        candidate_demand = int(candidate_demand)
-        if capacity < 0 or candidate_demand < 0:
-            raise ValueError("capacity and candidate_demand must be nonnegative")
+        if capacity < 0:
+            raise ValueError("capacity must be nonnegative")
         max_step = max((max(options) for options in grouped.values()), default=0)
         load_cap = capacity + max_step
 
@@ -113,7 +115,6 @@ def resource_bounds(
                     key_demand_pairs,
                     request_id,
                     capacity=capacity,
-                    candidate_demand=demand,
                 )
             loads = loads_cache[request_id]
 

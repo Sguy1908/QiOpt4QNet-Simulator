@@ -49,8 +49,10 @@ while the MPS compressor is $5$--$4{,}000\times$ faster and the
 exact-ILP benchmark certifies a mean relative optimality gap of $1.5\%$
 for the Metropolis solver.  We additionally derive global and per-resource
 request-conditioned reachable-load calibrations for the edge and memory
-capacity penalties that preserve exact ground-state correspondence while
-never exceeding the utility-scale reference bound.  Across 1,080 instances,
+capacity penalties that preserve exact ground-state correspondence
+(proved for zero soft-congestion weights, $C=E=0$, which all reported
+calibration runs used) while never exceeding the utility-scale
+reference bound.  Across 1,080 instances,
 per-resource calibration reduces mean edge and memory coefficients by 49.5\%
 and 46.3\%, and in the 1,078-instance SA/SQA comparison raises mean raw
 feasibility by 11.6 and 6.9 percentage points over global calibration
@@ -139,8 +141,9 @@ formulation and four extensions toward physical realism:
     OpenJij simulated annealing, and an embedded quantum-annealing
     backend against an exact-ILP reference (Sec.~\ref{sec:results-core}).
     We derive global and per-resource request-conditioned reachable-load
-    calibrations that preserves ground-state correspondence while never 
-    exceeding the utility-scale reference bound (Sec.~\ref{sec:penalty-calibration}).
+    calibrations that preserve ground-state correspondence for zero
+    soft-congestion weights ($C=E=0$) while never exceeding the
+    utility-scale reference bound (Sec.~\ref{sec:penalty-calibration}).
     We evaluate coefficient tightening on 1,080 instances and matched 
     SA/SQA outcomes on 1,078 selected instances (Sec.~\ref{sec:results-penalty}).
   \item \textbf{Stochastic reliability framework.}  We execute solver
@@ -1940,7 +1943,9 @@ frontier, with the MPS solver $5$--$4{,}000\times$
 faster and Metropolis within $1.5\%$ of the exact ILP; (ii) the direct slack-free Hamiltonian dominates the slack-variable
 QUBO in size and quality, while global and per-resource reachable-load
 calibration preserve ground-state correspondence under the stated
-assumptions.  Per-resource calibration tightens at least one capacity
+assumptions (notably $C=E=0$; with positive congestion weights the
+ground state need not be utility-optimal).
+Per-resource calibration tightens at least one capacity
 coefficient in 99.8\% of benchmark instances and improves mean SA/SQA
 feasibility and repaired reference gaps relative to both conventional
 and global calibration, at the cost of a small increase in raw SQA

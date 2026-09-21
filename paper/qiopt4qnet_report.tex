@@ -725,9 +725,10 @@ We compile the direct Hamiltonian to a QUBO matrix $Q$ and sample it
 with OpenJij's simulated-annealing sampler~\cite{openjij}, a
 production-grade reference for the Metropolis-style search of
 Sec.~\ref{sec:metropolis}.  Penalty coefficients $A,B,D$ are set by
-either the conventional utility-scale rule or the proposed
-resource-aware rule (Sec.~\ref{sec:calibration}), compared on held-out
-instances in Sec.~\ref{sec:results-calibration}.  This serves as the
+either the conventional utility-scale rule, the proposed
+resource-aware rule (Sec.~\ref{sec:calibration}) or its per-resource
+variant, compared on held-out instances in
+Sec.~\ref{sec:results-calibration}.  This serves as the
 baseline against which the adaptive top-$k$ reduction
 (Sec.~\ref{sec:adaptive-qubo}) and the embedded quantum-annealing
 backend (Sec.~\ref{sec:qa}) are measured under identical read counts.
@@ -1393,124 +1394,168 @@ now removed.
 \subsection{Penalty Coefficient Calibration}
 \label{sec:results-calibration}
 
-The two calibration rules of Sec.~\ref{sec:calibration} are validated
-on a held-out suite of 1{,}080 instances: four topology families
-(chain and grid), instance seeds 10--99 (disjoint from the seeds used
-in the exploratory experiments), and request counts
-$n \in \{8, 16, 24\}$.  The coefficient scan is purely
+We compare three rules on a held-out suite of 1{,}080 instances: the
+conventional utility-scale rule; the \emph{global} resource-aware rule
+of Sec.~\ref{sec:calibration}, which sets one $B$ and one $D$ per
+instance; and a \emph{per-resource} variant that applies the same
+single-removal certificate to every edge and memory resource
+separately.  Because the global coefficient is the maximum of the
+per-resource ones, $B=\max_e B_e$ and $D=\max_v D_v$, so
+$B_e \le B \le B_{\mathrm{ref}}$ for every resource.  The suite has four
+topology configurations (chain and grid), instance seeds 10--99
+(disjoint from the seeds used in the exploratory experiments), and
+request counts $n \in \{8, 16, 24\}$.  Soft-congestion weights were
+zero ($C=E=0$) in every run and no additional coefficient scaling was
+applied; the ground-state guarantee is proved only in that setting.
+A coefficient counts as tightened when its ratio to the conventional
+reference is below $0.999999$.  The coefficient scan is purely
 combinatorial---it requires no solver runs---and is followed by a
-matched solver study on exactly the instances where a coefficient
-difference exists.
+matched solver study on the instances where a coefficient differs.
 
 \subsubsection{Coefficient scan}
 
-At the exact $1\times$ calibration scale, the resource-aware rule
-produces a strictly lower $B$ in 133/1080 instances (12.3\%) and a
-strictly lower $D$ in 49/1080 (4.5\%); both coefficients are lowered
-simultaneously in 43 instances (4.0\%) and at least one is lowered in
-139 (12.9\%).  Conditional on strict tightening, $B$ is reduced by
-23.8\% and $D$ by 32.8\% on average (Fig.~\ref{fig:calib-ratios}).
-The distribution of ratios (left panel) shows the rule never exceeds
-the conventional scale, and the reduction boxplots (right panel) show
-that when tightening binds it is substantial.
+Under the global rule, $B$ is strictly lower in 121/1080 instances
+(11.2\%) and $D$ in 67/1080 (6.2\%); both are lowered in 61 instances
+(5.6\%) and at least one in 127 (11.8\%).  Conditional on strict
+tightening, $B$ is reduced by 38.4\% and $D$ by 48.5\% on average
+(Table~\ref{tab:calib-scan}).  Under the per-resource rule, at least
+one edge coefficient and at least one memory coefficient are strictly
+lower in 1{,}078 instances (99.8\%).  No calibrated coefficient exceeds
+its conventional reference, and $A$ is unchanged.
 
 \begin{table}[H]
   \centering
   \caption{Coefficient-scan summary over the 1{,}080 held-out
     instances at the $1\times$ calibration scale.  ``Tightened'' means
-the resource-aware coefficient is strictly lower than the
-utility-scale baseline; reductions are computed conditional on strict
-tightening.}
+    strictly lower than the utility-scale reference.  The last two rows
+    average over all instances, including unchanged ones; the
+    per-resource figure first averages the modeled coefficients within
+    an instance.}
   \label{tab:calib-scan}
   \begin{tabular}{lcc}
     \toprule
     Outcome & Instances & Share \\
     \midrule
-    $B$ strictly lower & 133/1080 & 12.3\% \\
-    $D$ strictly lower & 49/1080 & 4.5\% \\
-    Both $B$ and $D$ lower & 43/1080 & 4.0\% \\
-    At least one of $B$, $D$ lower & 139/1080 & 12.9\% \\
+    Global: $B$ strictly lower & 121/1080 & 11.2\% \\
+    Global: $D$ strictly lower & 67/1080 & 6.2\% \\
+    Global: both $B$ and $D$ lower & 61/1080 & 5.6\% \\
+    Global: at least one of $B$, $D$ lower & 127/1080 & 11.8\% \\
+    Per-resource: $\ge 1$ edge and $\ge 1$ memory coefficient lower
+      & 1078/1080 & 99.8\% \\
     \midrule
-    Mean $B$ reduction (when tightened) & --- & 23.8\% \\
-    Mean $D$ reduction (when tightened) & --- & 32.8\% \\
+    Global: mean $B$ / $D$ reduction (when tightened) & --- & 38.4\% / 48.5\% \\
+    Global: mean $B$ / $D$ reduction (all instances) & --- & 4.30\% / 3.01\% \\
+    Per-resource: mean $B$ / $D$ reduction (all instances) & --- & 49.51\% / 46.34\% \\
     \bottomrule
   \end{tabular}
 \end{table}
 
+The global and per-resource reductions measure different quantities.
+Since $B=\max_e B_e$, the largest per-resource coefficient equals the
+global one exactly, so the much larger per-resource means reflect
+lowering the \emph{non-binding} coefficients (on average 11.0 of 12.4
+modeled edge resources and 8.3 of 10.4 memory resources per instance).
+This compresses the coefficient dynamic range of the QUBO; it does not
+lower the binding penalty (Fig.~\ref{fig:calib-ratios}).
+
 \begin{figure}[H]
   \centering
   \includegraphics[width=\textwidth]{figure2_coefficient_ratios.png}
-  \caption{Resource-aware coefficient ratios relative to the
-    utility-scale baseline over 1{,}080 held-out cases, ordered by
-    ratio (left; the dashed line marks the conventional scale $1.0$),
-    and the reduction distribution conditional on tightening (right).}
+  \caption{Coefficient reductions relative to the utility-scale
+    baseline over the 1{,}080 held-out instances, for global and
+    per-resource calibration.  Zero reductions are included.}
   \label{fig:calib-ratios}
 \end{figure}
 
 \subsubsection{Tightening mechanism}
 
-The opportunity to tighten is governed by whether the minimum
-realizable penalty drop $\Delta = 1$ is reachable for a
-bundle--resource pair.  When $\Delta{=}1$ is reachable, the
-utility-to-drop ratio equals the utility itself and the resource-aware
-bound cannot beat the utility scale for that pair.  As request count
-grows, reachable loads densify and $\Delta{=}1$ cases dominate
-(Fig.~\ref{fig:calib-mechanism}, right): the fraction of violating
-bundle--resource pairs with $\Delta{=}1$ rises from 75\% at $n{=}8$ to
-97\% at $n{=}24$ for edges, and from 58\% to 94\% for memory.  In
-particular, a maximum-utility bundle ($P_0$) pinned to a $\Delta{=}1$
-case contributes $P_0/1 = P_0$ and forces the resource-aware bound
-back to the conventional scale; the $P_0$-pin frequency is 74\%--98\%
-for edges and 88\%--99.7\% for memory across the request-count range.
-Strict tightening correspondingly collapses with contention: $B$ in
-26.1\% of instances at $n{=}8$, 8.6\% at $n{=}16$, and 2.2\% at
-$n{=}24$; $D$ in 12.5\%, 0.8\%, and 0.3\% (Fig.~\ref{fig:calib-mechanism},
-left).  Within each request-count group the $P_0$-pin frequency is
-the exact complement of the strict-tightening frequency, directly
-confirming the saturation mechanism.
+The opportunity to tighten the \emph{global} rule is governed by
+whether the minimum realizable penalty drop $\Delta = 1$ is reachable
+for a bundle--resource pair.  When $\Delta{=}1$ is reachable, the
+utility-to-drop ratio equals the utility itself and the bound cannot
+beat the utility scale for that pair.  As request count grows,
+reachable loads densify and $\Delta{=}1$ cases dominate
+(Fig.~\ref{fig:calib-mechanism}): the mean fraction of eligible
+bundle--resource pairs with $\Delta{=}1$ rises from 68\% at $n{=}8$ to
+95\% at $n{=}24$ for edges, and from 48\% to 90\% for memory.  A
+maximum-utility bundle ($P_0$) pinned to a $\Delta{=}1$ case
+contributes $P_0/1 = P_0$ and forces the bound back to the conventional
+scale; the $P_0$-pin frequency is 75\%--98\% for edges and 83\%--100\%
+for memory across the request-count range.  Global strict tightening
+correspondingly collapses with contention: $B$ in 24.2\% of instances at
+$n{=}8$, 6.9\% at $n{=}16$, and 2.5\% at $n{=}24$; $D$ in 16.7\%, 1.9\%,
+and 0.0\%.  Within each request-count group the $P_0$-pin and
+strict-tightening frequencies sum to 100\% for $n \ge 16$ and to 99.4\%
+at $n{=}8$, consistent with the saturation mechanism.  The per-resource
+rule is far less exposed, because one pinned resource no longer raises
+the coefficient of every other resource.
 
 \begin{figure}[H]
   \centering
   \includegraphics[width=\textwidth]{figure1_mechanism_summary.png}
-  \caption{Calibration mechanism across request counts: strict
-    tightening frequency (left) and the fraction of violating
-    bundle--resource pairs with minimum penalty drop $\Delta{=}1$
-    (right), for edge ($B$) and memory ($D$) penalties.}
+  \caption{Tightening frequency across 360 instances per request
+    count for edge (left) and memory (right) penalties.  Per-resource
+    frequency counts an instance when at least one modeled coefficient
+    in that family tightens.}
   \label{fig:calib-mechanism}
 \end{figure}
 
 \subsubsection{Matched solver study}
 
-The 139 instances with at least one changed coefficient are solved
-with matched conventional and resource-aware QUBOs using OpenJij SA
-and SQA, five solver seeds (101, 202, 303, 404, 505), and 100 reads
-per run; CP-SAT certifies optimality where available.  Pooled raw
-feasible-read rates are near-identical (SA 0.099 vs.\ 0.086;
-SQA 0.285 vs.\ 0.281), as are repaired optimality gaps (SA 61.0\% vs.\
-60.7\%; SQA 29.1\% vs.\ 29.8\%).  The paired instance-level analysis
-(Fig.~\ref{fig:calib-paired}) confirms this: all four paired
-differences---raw feasibility and repaired gap, for SA and SQA---have
-bootstrap 95\% confidence intervals that include zero
-(Table~\ref{tab:calib-paired}).  Under the tested fixed-budget
-settings, tightening the capacity penalties does not produce a
-detectable systematic SA or SQA performance improvement.
+Solver comparisons use the 1{,}078 instances in which the global or the
+per-resource family-mean ratio is below the tightening threshold.
+Each rule and sampler (OpenJij SA and SQA) uses matched solver seeds
+101, 202, 303, 404, 505 with 100 requested reads per call; CP-SAT
+certifies optimality where available.  Within-call reads are not
+independent replicates.  Paired effects average the five calls within
+each instance before averaging across instances, and pointwise 95\%
+intervals use 10{,}000 bootstrap resamples of the 90 generation-seed
+blocks.
+
+Relative to the conventional rule, the global rule raises mean raw
+feasibility by 0.41 pp (SA) and 0.71 pp (SQA) and lowers the repaired
+reference gap by 0.50 and 0.80 pp.  These means are taken over all
+1{,}078 instances, of which 951 (88.2\%) have coefficients identical to
+the conventional reference under the global rule (they were selected on
+the per-resource criterion) and contribute exact zeros.  Restricted to
+the 127 instances where the global rule changed a coefficient, the
+feasibility gains are $+3.46$ pp (SA) and $+5.98$ pp (SQA).  The
+per-resource rule raises feasibility by 12.00 and 7.57 pp and lowers
+the gap by 10.84 and 6.75 pp (Table~\ref{tab:calib-paired},
+Fig.~\ref{fig:calib-paired}).  Because the global rule is itself a
+reachable-load rule, the conventional baseline conflates adopting
+reachable-load calibration with scoping it per resource, so the direct
+per-resource-versus-global contrast is reported as well: it accounts
+for nearly all of the effect (feasibility $+11.60$ and $+6.86$ pp, gap
+$-10.33$ and $-5.95$ pp).
 
 \begin{table}[H]
   \centering
-  \caption{Paired OpenJij effects (resource-aware minus conventional)
-    on the 139 instances with a coefficient difference, five solver
-    seeds averaged per instance.  All bootstrap 95\% confidence
-    intervals include zero.}
+  \caption{Paired OpenJij effects on 1{,}078 instances (five solver
+    seeds averaged per instance); 95\% bootstrap intervals in
+    brackets.  Feasibility and gap are in percentage points; overload
+    is in resource units (lower is better for gap and overload).  The
+    SQA overload interval for per-resource versus conventional has a
+    lower bound of $-5\times10^{-19}$ and is described as
+    indistinguishable from zero.}
   \label{tab:calib-paired}
-  \small
-  \begin{tabular}{lccc}
+  \footnotesize
+  \begin{tabular}{llccc}
     \toprule
-    Sampler & Metric & Mean diff. & 95\% CI \\
+    Contrast & Sampler & Raw feasibility (pp) & Repaired gap (pp) & Raw overload \\
     \midrule
-    SA  & Raw feasible-read rate & $-0.0130$ & $[-0.0288,\; 0.0014]$ \\
-    SA  & Repaired optimality gap (pp) & $-0.294$ & $[-1.011,\; 0.401]$ \\
-    SQA & Raw feasible-read rate & $-0.0043$ & $[-0.0475,\; 0.0388]$ \\
-    SQA & Repaired optimality gap (pp) & $+0.699$ & $[-0.785,\; 2.155]$ \\
+    Global $-$ conv. & SA
+      & $+0.41\ [0.07, 0.78]$ & $-0.50\ [-0.82, -0.22]$ & $+0.0013\ [-0.0204, 0.0256]$ \\
+    Global $-$ conv. & SQA
+      & $+0.71\ [0.13, 1.30]$ & $-0.80\ [-1.19, -0.45]$ & $+0.0006\ [-0.0028, 0.0041]$ \\
+    Per-res.\ $-$ conv. & SA
+      & $+12.00\ [10.44, 13.54]$ & $-10.84\ [-11.67, -9.98]$ & $-1.5325\ [-1.6731, -1.3896]$ \\
+    Per-res.\ $-$ conv. & SQA
+      & $+7.57\ [5.75, 9.40]$ & $-6.75\ [-7.51, -6.01]$ & $+0.0178\ [-0.0000, 0.0381]$ \\
+    Per-res.\ $-$ global & SA
+      & $+11.60\ [10.05, 13.15]$ & $-10.33\ [-11.20, -9.46]$ & $-1.5338\ [-1.6796, -1.3855]$ \\
+    Per-res.\ $-$ global & SQA
+      & $+6.86\ [5.15, 8.63]$ & $-5.95\ [-6.58, -5.35]$ & $+0.0173\ [0.0004, 0.0362]$ \\
     \bottomrule
   \end{tabular}
 \end{table}
@@ -1518,23 +1563,30 @@ detectable systematic SA or SQA performance improvement.
 \begin{figure}[H]
   \centering
   \includegraphics[width=\textwidth]{figure3_solver_paired_effects.png}
-  \caption{Paired OpenJij effects of resource-aware vs.\ conventional
-    calibration on the 139 instances with a coefficient difference
-    (SA and SQA, five solver seeds, 100 reads).  All bootstrap 95\%
-    confidence intervals include zero.}
+  \caption{Paired OpenJij effects for three contrasts (global versus
+    conventional, per-resource versus conventional, per-resource
+    versus global) on 1{,}078 instances.  Positive values favor the
+    first rule named in each contrast.}
   \label{fig:calib-paired}
 \end{figure}
 
-\paragraph{Takeaway.}
-Resource-aware calibration is best framed as a
-coefficient-tightening method, not a solver improvement: it gives a
-provably no-larger sufficient resource-penalty calibration, produces
-substantially tighter coefficients in identifiable sparse
-reachable-load regimes, and leaves OpenJij solution quality
-statistically unchanged under fixed budgets.  The fixed-budget solver
-evaluation is reported as a negative result: the benefit of
-resource-aware $B/D$ tightening lies in the coefficient itself, not in
-annealing behavior.
+We report $3$ contrasts $\times$ $2$ samplers $\times$ $3$ metrics
+$=18$ paired comparisons and apply no multiplicity correction, so about
+one interval in twenty would be expected to exclude zero by chance.
+Intervals reflect generation-seed variation over five fixed solver
+seeds only.
+
+\paragraph{Takeaway and limitations.}
+Under fixed budgets, the benefit comes almost entirely from scoping the
+certificate per resource rather than from the reachable-load rule as
+such.  Absolute quality remains modest: mean repaired reference gaps
+under per-resource calibration are still 75.5\% (SA) and 22.9\% (SQA),
+and per-resource calibration is worse than conventional in about 24.0\%
+(SA) and 25.6\% (SQA) of instances.  It also raises raw SQA overload
+slightly against the global rule (mean $0.017$ resource units).  Because
+the per-resource gain arises by lowering non-binding penalties, the
+evidence supports it as a way to improve the annealing landscape under a
+fixed read budget, not as a reduction of the binding penalty.
 
 \subsection{Temporal-Memory Joint Scheduling}
 \label{sec:results-joint}
@@ -2327,11 +2379,13 @@ selections (Sec.~\ref{sec:contention}).
     (Sec.~\ref{sec:results-qa}).
   \item Resource-aware penalty calibration
     (Sec.~\ref{sec:results-calibration}) provably never loosens the
-    sufficient coefficients of the utility-scale baseline, tightens
-    $B$/$D$ by $23.8$/$32.8\%$ on average on the $139$ of $1{,}080$
-    held-out instances where tightening binds, and---as a negative
-    result---produces no detectable OpenJij SA/SQA quality change
-    under fixed budgets.
+    sufficient coefficients of the utility-scale baseline (with
+    ground-state correspondence proved for $C=E=0$).  The global rule
+    tightens $B$/$D$ in $11.8\%$ of the $1{,}080$ held-out instances;
+    the per-resource rule tightens at least one edge and one memory
+    coefficient in $99.8\%$ and raises mean SA/SQA raw feasibility by
+    $11.6$/$6.9$ pp and lowers repaired gaps by $10.3$/$6.0$ pp over the
+    global rule, at the cost of a small increase in raw SQA overload.
 \end{enumerate}
 
 \subsection{Findings on the Implemented Extensions}
@@ -2389,8 +2443,8 @@ following conclusions to the core results:
     combinatorial and solver-free; porting the resource-aware bound to
     a live annealer would test whether the coefficient-tightening
     translates into wall-time or read-count savings at scale, and
-    whether the ``no solver-quality effect'' negative result survives
-    on larger instances and denser topologies.
+    whether the per-resource gains survive on larger instances, denser
+    topologies, larger read budgets, and nonzero congestion weights.
 \end{enumerate}
 
 \begin{thebibliography}{20}

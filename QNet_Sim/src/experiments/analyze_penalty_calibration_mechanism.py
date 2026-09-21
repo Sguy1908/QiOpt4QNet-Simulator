@@ -74,17 +74,16 @@ def analyze_family(
                 continue
 
             request_id = key[0]
-            cache_key = (request_id, demand)
-
-            if cache_key not in loads_cache:
-                loads_cache[cache_key] = possible_loads(
+            # The capped reachable-load set depends only on the excluded
+            # request, not on the candidate's demand.
+            if request_id not in loads_cache:
+                loads_cache[request_id] = possible_loads(
                     key_demand_pairs,
                     request_id,
                     capacity=capacity,
-                    candidate_demand=demand,
                 )
 
-            loads = loads_cache[cache_key]
+            loads = loads_cache[request_id]
 
             violating = [
                 load

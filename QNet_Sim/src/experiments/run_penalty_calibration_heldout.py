@@ -26,6 +26,7 @@ from collections import defaultdict
 from experiments.instances import contention_sweep_instances
 from experiments.run_penalty_calibration import (
     _gap_pct,
+    coefficient_stats,
     _oracle_result,
     _topology_cases,
     _write_csv,
@@ -58,16 +59,6 @@ def mean_finite(rows, key):
 
     return statistics.fmean(values) if values else math.nan
 
-def coefficient_stats(value):
-    if isinstance(value, dict):
-        values = list(value.values()) or [0.0]
-        return {
-            "mean": statistics.fmean(values),
-            "min": min(values),
-            "max": max(values),
-            "n": len(values),
-        }
-    return {"mean": value, "min": value, "max": value, "n": 1}
 def summarize_group(rows):
     instances = {
         (
