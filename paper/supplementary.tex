@@ -1,0 +1,177 @@
+% Supplementary information for manuscript.tex (npj Quantum Information).
+%
+% Base text: the collaborator's supplement. Sections on the penalty-calibration
+% study (scope, coefficient scale, inference, secondary outcomes, read budget)
+% were rewritten from the artifacts in QNet_Sim/results/penalty_calibration/.
+% The physics audit, benchmark, hardness, Boundary-TN, true-MPS and reliability
+% sections are unchanged from the draft and rest on a frozen package that is
+% not part of this repository.
+\documentclass[pdflatex,sn-nature]{sn-jnl}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{microtype}
+\begin{document}
+\title{Supplementary Information: Physics-aware entanglement orchestration in quantum networks}
+\author*[1]{\fnm{Author details} \sur{to be added before submission}}\email{corresponding.author@placeholder.invalid}
+\affil*[1]{\orgname{Affiliations to be added before submission}, \orgaddress{\country{Country}}}
+\maketitle
+
+\section{Scope and provenance of the evidence}
+The supplementary information documents the experiments used by the main manuscript: the penalty-calibration study, the accepted journal benchmark, hardness sweep, Boundary-TN ablation, true-MPS ablation, stochastic robustness study, physics-validation audit and randomized ground-state audit. Two exploratory artifacts were deliberately excluded from quantitative claims: a topology-robustness file contained 10 rows where 250 had been expected, and a Rosales-extension file contained 4 of 24 planned rows. No result from those incomplete artifacts appears as evidence in the main text.
+
+The calibration study generated 1,080 instances (four topology--capacity configurations, 90 generation seeds, request counts 8, 16 and 24) with no empty instance. Instances were selected for the solver study when the global or the per-resource family-mean coefficient ratio to the conventional coefficient fell below $0.999999$, which yielded 1,078 instances, 32,340 solver rows, 6,468 instance--sampler--calibration aggregate cells, 90 generation-seed blocks and five solver seeds per instance ($101,202,303,404,505$). Solver seeds are repeated measurements; inference is performed after averaging them within an instance. Every calibration number in the manuscript is regenerated from the repository (see \texttt{QNet\_Sim/results/README.md}); the four topology--capacity configurations are a chain with 8 nodes and edge capacity 4, a $3\times3$ grid with capacity 4, a chain with 10 nodes and capacity 6 and a $4\times4$ grid with capacity 5.
+
+\section{Supplementary physics checks}
+The physical screening layer was checked independently of the allocation solvers. The accepted physics audit used 150,000 Bernoulli Monte Carlo samples for path-success consistency, verified the $F(t)\rightarrow1/4$ Werner-memory floor and monotonicity, and compared analytic swapping/storage formulas with independent density-matrix constructions. Maximum absolute density-matrix fidelity error was $4.44\times10^{-16}$ and maximum swap cross-check error was $1.11\times10^{-16}$; the maximum standardized Monte Carlo deviation was 3.057. These are implementation-consistency checks and must not be interpreted as external hardware validation.
+
+The ground-state audit generated 2,000 randomized tiny allocation instances, enumerated all binary subsets, and checked that every QUBO ground state was feasible and attained the constrained optimal utility under the per-resource calibration, with zero soft-congestion weights ($C=E=0$). All 2,000 cases passed. The audit includes at-most-one-request conflicts, edge capacities and memory capacities. The audit does not cover positive congestion weights, for which no optimality guarantee is claimed.
+
+\section{Benchmark regime definitions}
+\begin{table*}[h]
+\caption{Journal benchmark regimes.}\centering\small
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+Regime & Nodes & Requests & $k$ paths & Max bundles & Edge scale & Memory scale\\
+\midrule
+Exact bottleneck & 14 & 12 & 5 & 16 & 0.80 & 0.85\\
+Exact geometric & 16 & 14 & 5 & 16 & 0.85 & 0.90\\
+Medium bottleneck & 32 & 32 & 6 & 18 & 0.68 & 0.75\\
+Medium Waxman & 40 & 36 & 6 & 18 & 0.72 & 0.80\\
+Large bottleneck & 80 & 72 & 6 & 16 & 0.62 & 0.72\\
+Large geometric & 100 & 80 & 6 & 16 & 0.68 & 0.75\\
+\bottomrule
+\end{tabular}
+\end{table*}
+Exact and medium regimes use ten generation seeds; the two large regimes use five. Exact CP-SAT certificates are used where computationally practical. For larger cases, reference gap is explicitly to the best observed feasible solution and is not described as an optimality gap.
+
+\section{Hardness sweep}
+The hardness experiment contains 768 solver-instance rows: six request counts ($12,20,28,36,44,52$), four capacity scales ($1.10,0.90,0.75,0.62$), eight seeds and four solvers. Across the complete sweep, Greedy-scarcity has mean gap 1.0725\%, Boundary-TN 5.8877\%, AdaptiveLNS 0.0354\%, and HybridBoundaryTN+ALNS 0.0220\%. Median runtimes are 0.0014, 4.875, 4.20 and 7.46 s, respectively. The maximum mean greedy cell gap is approximately 2.94\%, so the data support a moderate contention effect rather than a sharp universal phase transition.
+
+\section{Boundary-TN width ablation}
+\begin{table}[h]
+\caption{Boundary-TN width--quality--runtime trade-off. Eight seeds are evaluated at every width and no fallback is used.}\centering\small
+\begin{tabular}{@{}rrr@{}}
+\toprule
+$\chi$ & Mean gap to LNS (\%) & Median runtime (s)\\
+\midrule
+8 & 13.188 & 0.326\\
+16 & 13.130 & 0.848\\
+32 & 9.114 & 1.717\\
+64 & 8.128 & 2.906\\
+128 & 7.793 & 5.380\\
+256 & 4.998 & 11.270\\
+\bottomrule
+\end{tabular}
+\end{table}
+The mean frontier improves with retained width, although individual seeds need not be monotone. The hybrid solver is reported separately because it adds exact-neighborhood refinement.
+
+\section{True-MPS audit}
+The true-MPS experiment contains 180 rows, covering six bond dimensions, three SVD sweep counts and ten seeds. Greedy fallback is disabled and \texttt{fallback\_used=False} for every row. Table~\ref{tab:mps} shows mean repaired gap to the same reference and median wall time. Raw and repaired MPS utilities coincide in these aggregate cells; the principal purpose is to verify actual MPS behavior without hidden cross-solver replacement.
+
+\begin{table*}[h]
+\caption{True-MPS ablation.}\label{tab:mps}\centering\small
+\begin{tabular}{@{}rrrrrrrrr@{}}
+\toprule
+$\chi$ & \multicolumn{2}{c}{1 sweep} & \multicolumn{2}{c}{2 sweeps} & \multicolumn{2}{c}{4 sweeps}\\
+ & Gap (\%) & s & Gap (\%) & s & Gap (\%) & s\\
+\midrule
+2  & 19.65 & 0.054 & 14.78 & 0.116 & 11.63 & 0.173\\
+4  & 21.32 & 0.561 & 18.72 & 1.043 & 16.58 & 2.907\\
+8  & 21.53 & 0.418 & 21.72 & 3.746 & 21.47 & 3.886\\
+16 & 17.64 & 1.313 & 17.64 & 4.259 & 17.64 & 8.605\\
+32 & 21.44 & 1.905 & 21.44 & 9.834 & 21.37 & 44.106\\
+64 & 21.37 & 3.536 & 21.37 & 58.939 & 21.68 & 318.843\\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\section{Reliability-study aggregates}
+\begin{table}[h]
+\caption{Out-of-sample robustness study; means over accepted runs except median wall time.}\centering\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Policy & Utility & SLA violation & Fidelity & Median s\\
+\midrule
+Nominal & 124.254 & 0.1627 & 0.8600 & 4.447\\
+Robust & 114.514 & 0.1212 & 0.8626 & 3.616\\
+Chance & 115.643 & 0.0602 & 0.8634 & 3.367\\
+\bottomrule
+\end{tabular}
+\end{table}
+Selected plans are evaluated with a fresh Monte Carlo stream, not the scenarios used to score candidate bundles. The chance policy therefore supplies an out-of-sample comparison under the declared perturbation model rather than a resubstitution estimate.
+
+\section{Per-resource calibration: coefficient scale}
+\begin{table}[h]
+\caption{Mean coefficient ratios relative to the conventional utility-scale coefficient, over all 1,080 generated instances (mean over each instance's resources, then over instances).}\centering\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Scope & $B_{\rm global}$ & $B_{\rm per}$ & $D_{\rm global}$ & $D_{\rm per}$\\
+\midrule
+Overall & 0.957 & 0.505 & 0.970 & 0.537\\
+8 requests & 0.889 & 0.352 & 0.914 & 0.350\\
+16 requests & 0.986 & 0.531 & 0.996 & 0.575\\
+24 requests & 0.997 & 0.631 & 1.000 & 0.686\\
+\bottomrule
+\end{tabular}
+\end{table}
+At least one edge and one memory coefficient is strictly tighter under the per-resource rule in 1,078 of the 1,080 generated instances. Resource-weighted tightening fractions are 0.887 for edges and 0.803 for memories. The mean per-resource ratio averages over non-binding resources: since $B_{\rm global}=\max_eB_e$, the largest per-instance edge coefficient equals the global coefficient exactly, and the reduction is not a reduction of the binding penalty. The load dependence is consistent with the reachable-load mechanism: denser request sets reduce gaps in the discrete co-load support and therefore increase the frequency of small penalty drops.
+
+\section{Primary calibration inference}
+\begin{table*}[h]
+\caption{All paired solver comparisons on the 1,078 evaluated instances. Means are over instances after averaging five solver seeds; intervals are 10,000-resample generation-seed-block bootstrap 95\% intervals. Feasible rate is a fraction; repaired gap is in percentage points; overload is in raw resource units. C: conventional, G: global resource-aware, PR: per-resource.}\centering\small
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}llrrrl@{}}
+\toprule
+Contrast & Sampler / metric & Baseline mean & Treatment mean & Difference & 95\% CI\\
+\midrule
+PR $-$ C & SA feasible rate & 0.2397 & 0.3597 & $+0.1200$ & $[+0.1044,+0.1354]$\\
+PR $-$ C & SA repaired gap & 86.30 & 75.47 & $-10.84$ & $[-11.67,-9.98]$\\
+PR $-$ C & SA raw overload & 4.264 & 2.732 & $-1.5325$ & $[-1.6731,-1.3896]$\\
+PR $-$ C & SQA feasible rate & 0.3874 & 0.4631 & $+0.0757$ & $[+0.0575,+0.0940]$\\
+PR $-$ C & SQA repaired gap & 29.69 & 22.94 & $-6.75$ & $[-7.51,-6.01]$\\
+PR $-$ C & SQA raw overload & 0.0787 & 0.0965 & $+0.0178$ & $[-0.0000,+0.0381]$\\
+\addlinespace
+PR $-$ G & SA feasible rate & 0.2438 & 0.3597 & $+0.1160$ & $[+0.1005,+0.1315]$\\
+PR $-$ G & SA repaired gap & 85.80 & 75.47 & $-10.33$ & $[-11.20,-9.46]$\\
+PR $-$ G & SA raw overload & 4.265 & 2.732 & $-1.5338$ & $[-1.6796,-1.3855]$\\
+PR $-$ G & SQA feasible rate & 0.3944 & 0.4631 & $+0.0686$ & $[+0.0515,+0.0863]$\\
+PR $-$ G & SQA repaired gap & 28.89 & 22.94 & $-5.95$ & $[-6.58,-5.35]$\\
+PR $-$ G & SQA raw overload & 0.0792 & 0.0965 & $+0.0173$ & $[+0.0004,+0.0362]$\\
+\addlinespace
+G $-$ C & SA feasible rate & 0.2397 & 0.2438 & $+0.0041$ & $[+0.0007,+0.0078]$\\
+G $-$ C & SA repaired gap & 86.30 & 85.80 & $-0.50$ & $[-0.82,-0.22]$\\
+G $-$ C & SA raw overload & 4.264 & 4.265 & $+0.0013$ & $[-0.0204,+0.0256]$\\
+G $-$ C & SQA feasible rate & 0.3874 & 0.3944 & $+0.0071$ & $[+0.0013,+0.0130]$\\
+G $-$ C & SQA repaired gap & 29.69 & 28.89 & $-0.80$ & $[-1.19,-0.45]$\\
+G $-$ C & SQA raw overload & 0.0787 & 0.0792 & $+0.0006$ & $[-0.0028,+0.0041]$\\
+\addlinespace
+G $-$ C, 127 changed & SA feasible rate & 0.1969 & 0.2315 & $+0.0346$ & $[+0.0063,+0.0656]$\\
+G $-$ C, 127 changed & SA repaired gap & 77.48 & 73.21 & $-4.27$ & $[-6.98,-1.94]$\\
+G $-$ C, 127 changed & SA raw overload & 4.984 & 4.995 & $+0.0110$ & $[-0.1687,+0.2276]$\\
+G $-$ C, 127 changed & SQA feasible rate & 0.2992 & 0.3591 & $+0.0598$ & $[+0.0133,+0.1079]$\\
+G $-$ C, 127 changed & SQA repaired gap & 35.46 & 28.69 & $-6.77$ & $[-9.96,-3.88]$\\
+G $-$ C, 127 changed & SQA raw overload & 0.0331 & 0.0378 & $+0.0047$ & $[-0.0228,+0.0344]$\\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+The 24 comparisons above (18 over all evaluated instances and 6 for the restricted global contrast) are reported with no multiplicity correction, so roughly one interval in twenty would be expected to exclude zero by chance alone. One interval has a lower bound that straddles zero at floating-point resolution (PR $-$ C, SQA raw overload, $-5\times10^{-19}$) and is described as indistinguishable from zero rather than significant. Intervals resample 90 generation-seed blocks (65 blocks in the restricted subset) and describe variation across generated instances only; the five solver seeds are fixed. The global resource-aware control is a small pooled effect because 951 of the 1,078 evaluated instances (88.2\%) have coefficients identical to the conventional reference under the global rule and contribute exact zeros; the restricted rows remove this dilution. Comparisons of per-resource against conventional calibration are worse in 24.0\% (SA) and 25.6\% (SQA) of instances by repaired gap, and better in 71.7\% and 74.4\%.
+
+\section{Secondary calibration outcomes}
+Raw overload is the only secondary outcome analysed with the same paired design and is included in the table above. For SA, per-resource calibration reduces mean raw overload from 4.264 to 2.732 resource units. For SQA the change is small and not favorable: overload rises from 0.0787 to 0.0965 units against the conventional rule (indistinguishable from zero) and by $0.0173$ units against the global rule (95\% CI $[0.0004,0.0362]$). Mean repaired reference gaps under per-resource calibration remain 75.5\% (SA) and 22.9\% (SQA); calibration is an encoding improvement and does not make the annealing baseline competitive with the strongest constrained solvers in the separate benchmark.
+
+\section{Fixed-seed reads and solver budget}
+With a fixed random seed, the OpenJij simulated-annealing and simulated-quantum-annealing samplers return identical reads within one call. For requested read counts of 1, 100 and 1,000 the returned number of samples equals the request, but the number of distinct samples is one, for both samplers (checked on chain and grid instances with solver seed 101). A ``100-read'' call in the calibration study is therefore a single sample per solver seed, every archived call is uniformly feasible or uniformly infeasible (the analysis asserts that the raw feasible rate of each call is 0 or 1), and the read count is not a sampling budget. This also explains why increasing the requested reads from 100 to 1,000 leaves every effect unchanged.
+
+Drawing each read as its own seeded call (seeds $s,s+1,\ldots$) makes extra reads independent but is expensive: a single-read call takes about 17 ms on a 65-variable instance and about 230 ms on a 209-variable instance, so 1,000 independent reads take roughly 17 s and 230 s, respectively.
+% TODO: insert the full-cohort independent-reads budget table (1,078 instances,
+% SA, reads 10 vs 100, 10x sweeps, seeds 101 and 202) from
+% QNet_Sim/results/penalty_calibration/budget_sensitivity_summary.csv once the run completes.
+
+\section{Reproducibility checklist}
+The final package records source and result SHA-256 hashes, Python and package versions, accelerator metadata, frozen CSV/JSON outputs and provenance notes. The penalty-calibration results are regenerated by \texttt{run\_penalty\_calibration\_heldout.py}, \texttt{analyze\_penalty\_calibration\_heldout.py} and \texttt{analyze\_penalty\_calibration\_mechanism.py}, and the budget diagnostics by \texttt{run\_penalty\_calibration\_budget.py}; the mapping from each output file to its generating script is in \texttt{QNet\_Sim/results/README.md}. Final manuscript claims are restricted to artifacts passing the freeze audit. Author names, affiliations, funding, CRediT contributions, competing-interest wording, repository DOI and archive DOI remain administrative placeholders to be completed before submission.
+
+\end{document}
