@@ -40,14 +40,14 @@ across processes.
 The 46 committed PDFs and PNGs total about 3.5 MB, so this is a policy about
 reviewability rather than repository size.
 
-- PDFs and PNGs are committed so the manuscripts in `paper/` build without
-  rerunning experiments: both `.tex` files set `\graphicspath` to the two
-  `figures/` directories. They are marked `binary` in `.gitattributes`.
+- PDFs and PNGs are committed so the manuscript in `paper/` builds without
+  rerunning experiments: `manuscript.tex` takes the calibration figures from
+  `results/penalty_calibration/figures/` (its other figures live in
+  `paper/figures/`). They are marked `binary` in `.gitattributes`.
 - Regenerate and commit a figure **only when the numbers behind it changed**,
   in the same commit as the data change, so a reviewer can see why a binary
   moved. Do not commit incidental re-renders.
-- Compiled manuscript PDFs in `paper/` are rebuilt only when the `.tex`
-  changes.
+- Compiled PDFs in `paper/` are rebuilt only when the `.tex` changes.
 - Do not add other binary formats or large raw outputs.
 - Git LFS or release assets are the next step if this outgrows the policy. That
   is a maintainer decision (it changes how clones fetch history), so it is not
