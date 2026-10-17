@@ -6,7 +6,7 @@ memories are *temporal* resources:
 
 * each entangled pair occupies a slot only between its generation time and
   its consumption (swap / purification / delivery) time,
-* pairs decay while stored: F(a) = F0 * (1/4)[1 + 3 e^{-a/T2}(1 + e^{-a/T1})/2]
+* pairs decay while stored: F(a) = 1/4 + (F0 - 1/4) e^{-a/T2}(1 + e^{-a/T1})/2
   where ``a = t - t_gen`` is the pair's age,
 * a pair that outlives its coherence window (age > tau_mem) is *expired* and
   must be discarded or regenerated.
@@ -32,9 +32,10 @@ from typing import Dict, List, Optional, Tuple
 class EntangledPair:
     """A single stored Bell pair with an age-dependent fidelity.
 
-    Fidelity decays from ``initial_fidelity`` under the standard storage model
-    F(t) = (1/4)[1 + 3 e^{-t/T2} (1 + e^{-t/T1}) / 2], the same convention used
-    by ``optimization.time_dependent_optimizer.fidelity_after_hold``.
+    Fidelity decays from ``initial_fidelity`` F0 under the storage model
+    F(t) = 1/4 + (F0 - 1/4) e^{-t/T2} (1 + e^{-t/T1}) / 2, which reaches the
+    fully mixed value 1/4 for any F0; the same convention is used by
+    ``optimization.time_dependent_optimizer.fidelity_after_hold``.
     """
 
     pair_id: str
@@ -52,9 +53,8 @@ class EntangledPair:
         if a <= 0 or self.t2 <= 0:
             return self.initial_fidelity
         t1 = self.t1 if self.t1 and self.t1 > 0 else 2.0 * self.t2
-        decay = 0.25 * (1.0 + 3.0 * math.exp(-a / self.t2)
-                        * (1.0 + math.exp(-a / t1)) / 2.0)
-        return self.initial_fidelity * decay
+        eta = math.exp(-a / self.t2) * (1.0 + math.exp(-a / t1)) / 2.0
+        return 0.25 + (self.initial_fidelity - 0.25) * eta
 
     def is_expired(self, t: float, tau_mem: float) -> bool:
         """A pair is expired once its stored fidelity drops below the fully

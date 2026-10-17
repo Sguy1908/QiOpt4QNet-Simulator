@@ -28,22 +28,19 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 def fidelity_after_hold(fidelity: float, hold_time: float, tau_mem: float,
                         t1: Optional[float] = None) -> float:
-    """T1/T2 decoherence of a stored Bell pair.
+    """T1/T2 decoherence of a stored Werner-like Bell pair.
 
-    Uses the standard storage-decay model
-        F(t) = (1/4)[1 + 3 e^{-t/T2} (1 + e^{-t/T1})/2]
-    with T2 = tau_mem and T1 = 2*T2 by default.  The relative fidelity is
-    identity at t=0, decays to 1/4 (completely mixed state) as t -> inf, and
-    is applied multiplicatively to the input fidelity so it composes with the
-    end-to-end path fidelity.
+    Uses the storage model of the manuscript (Eq. ``memory``)
+        F(t) = 1/4 + (F0 - 1/4) eta(t),  eta(t) = e^{-t/T2} (1 + e^{-t/T1}) / 2
+    with T2 = tau_mem and T1 = 2*T2 by default. F(0) = F0 and F(t) -> 1/4
+    (the completely mixed state) as t -> inf for every F0.
     """
     if hold_time <= 0 or tau_mem <= 0:
         return fidelity
     t2 = tau_mem
     t1v = t1 if t1 and t1 > 0 else 2.0 * t2
-    decay = 1.0 / 4.0 * (1.0 + 3.0 * math.exp(-hold_time / t2)
-                         * (1.0 + math.exp(-hold_time / t1v)) / 2.0)
-    return fidelity * decay
+    eta = math.exp(-hold_time / t2) * (1.0 + math.exp(-hold_time / t1v)) / 2.0
+    return 0.25 + (fidelity - 0.25) * eta
 
 
 def _utility_of(bundles, selected):
@@ -254,6 +251,39 @@ def run_time_dependent_comparison(topology_fn: Callable, n_slots: int = 30,
     return result
 
 
+RISK_GAINS = (0.0, 0.25, 0.5, 1.0, 2.0, 4.0)
+
+
+def run_risk_gain_sweep(topology_fn: Callable, risk_gains=RISK_GAINS,
+                        out_dir: Optional[str] = None, **kwargs) -> List[Dict]:
+    """Sweep ``risk_gain`` on one Poisson trace; writes ``risk_gain_tradeoff.csv``.
+
+    The static router does not use ``risk_gain``, so its columns are constant
+    across rows. ``kwargs`` go to ``run_time_dependent_comparison``.
+    """
+    rows = []
+    for gain in risk_gains:
+        res = run_time_dependent_comparison(topology_fn, risk_gain=gain, **kwargs)
+        rows.append({
+            "risk_gain": gain,
+            "served_dec": res["decoherence_aware"]["served"],
+            "served_static": res["static"]["served"],
+            "utility_dec": round(res["decoherence_aware"]["utility"], 2),
+            "utility_static": round(res["static"]["utility"], 2),
+            "fid_dec": round(res["decoherence_aware"]["mean_delivered_fidelity"], 4),
+            "fid_static": round(res["static"]["mean_delivered_fidelity"], 4),
+        })
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+        path = os.path.join(out_dir, "risk_gain_tradeoff.csv")
+        with open(path, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            w.writeheader()
+            w.writerows(rows)
+        print(f"Wrote {path}")
+    return rows
+
+
 if __name__ == "__main__":
     from experiments.instances import generate_chain_topology
     out_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",
@@ -269,3 +299,5 @@ if __name__ == "__main__":
         print(f"{name:>18}: served {r['served']}/{r['n_requests']} "
               f"(ratio {r['served_ratio']:.3f}), utility {r['utility']:.1f}, "
               f"delivered fidelity {r['mean_delivered_fidelity']:.3f}")
+    run_risk_gain_sweep(topo, n_slots=20, mean_rate=1.5, tau_mem=5.0,
+                        out_dir=out_dir)
