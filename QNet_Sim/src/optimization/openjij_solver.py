@@ -8,9 +8,16 @@ four experiment modes explicit:
   calibration with one global coefficient per resource family;
 * resource_aware_per (alias: per_resource): the same certificate scoped to
   each individual edge and memory resource;
+* local_utility (alias: local_max): per-resource scope without the
+  reachable-load bound (max positive utility of the bundles using a resource);
 * fixed: user-supplied coefficients for legacy/sensitivity runs.
 
 Soft congestion C/E is kept separate from hard-constraint A/B/D calibration.
+
+With a fixed ``seed`` OpenJij returns the same state for every read of one
+call, so ``num_reads`` is not a sampling budget. Draw reads as separate seeded
+calls (``experiments.run_penalty_calibration_budget.draw_reads`` with
+``independent=True``) when independent samples are needed.
 """
 
 from __future__ import annotations
@@ -71,6 +78,14 @@ def calibrated_coefficients(
             congestion_penalty=congestion_penalty,
             memory_congestion_penalty=memory_congestion_penalty,
         )
+    elif strategy in {"local_utility", "local_max"}:
+        from .proposed_calibrator import local_utility_coefficients
+
+        coeffs = local_utility_coefficients(
+            optimizer,
+            congestion_penalty=congestion_penalty,
+            memory_congestion_penalty=memory_congestion_penalty,
+        )
     elif strategy == "fixed":
         if fixed_coefficients is None:
             raise ValueError("fixed_coefficients are required for strategy='fixed'")
@@ -89,7 +104,8 @@ def calibrated_coefficients(
     else:
         raise ValueError(
             "strategy must be one of: conventional, resource_aware "
-            "(resource-aware, proposed), resource_aware_per (per_resource), fixed"
+            "(resource-aware, proposed), resource_aware_per (per_resource), "
+            "local_utility (local_max), fixed"
         )
 
     for key in ("A", "B", "D"):
@@ -113,8 +129,15 @@ def build_calibrated_bqm(
     fixed_coefficients: Optional[Mapping[str, float]] = None,
     congestion_penalty: float = 0.0,
     memory_congestion_penalty: float = 0.0,
+    pairwise_request_penalty: bool = False,
 ):
-    """Build a BQM and return ``(bqm, coefficients)``."""
+    """Build a BQM and return ``(bqm, coefficients)``.
+
+    ``pairwise_request_penalty=True`` replaces the uniform request-conflict
+    coefficient ``A`` by ``A_bc = min(u_b^+, u_c^+) + eps`` on each pair (see
+    ``proposed_calibrator.pairwise_request_penalties``); the mapping is
+    returned under ``coefficients["A_pairs"]``.
+    """
     coeffs = calibrated_coefficients(
         optimizer,
         strategy,
@@ -131,6 +154,15 @@ def build_calibrated_bqm(
         congestion_penalty=coeffs["C"],
         memory_congestion_penalty=coeffs["E"],
     )
+    if pairwise_request_penalty:
+        from .proposed_calibrator import (
+            apply_pairwise_request_penalties,
+            pairwise_request_penalties,
+        )
+
+        pairs = pairwise_request_penalties(optimizer, safety_factor=coefficient_scale)
+        apply_pairwise_request_penalties(optimizer, bqm, coeffs["A"], pairs)
+        coeffs["A_pairs"] = pairs
     return bqm, coeffs
 
 

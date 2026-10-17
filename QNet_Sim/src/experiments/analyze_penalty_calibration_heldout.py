@@ -33,6 +33,30 @@ CONTRASTS = [
     ("resource_aware_per", "resource_aware"),
 ]
 METRICS = [("raw_feasible_rate", "raw_feasible_rate", False), ("repaired_reference_gap_pct", "repaired_optimality_gap_pct", True), ("raw_mean_overload_units", "raw_mean_overload_units", True)]
+# Robustness metric, reported in its own file so the primary family of
+# comparisons is unchanged: feasible *and* positive utility. The empty
+# selection is always feasible, so raw feasibility alone rewards "admit nothing".
+NONTRIVIAL_METRICS = [("raw_nontrivial_feasible_rate", "raw_nontrivial_feasible_rate", False)]
+
+
+def add_nontrivial_feasibility(rows):
+    """Add ``raw_nontrivial_feasible_rate`` to archived rows that lack it.
+
+    Archived calls return identical reads (fixed seed; the analysis asserts a
+    0/1 feasible rate), so a call is non-trivially feasible exactly when it is
+    feasible and its best raw-feasible utility is positive.
+    """
+    out = []
+    for row in rows:
+        row = dict(row)
+        if "raw_nontrivial_feasible_rate" not in row or row["raw_nontrivial_feasible_rate"] == "":
+            utility = float(row["raw_best_feasible_utility"] or "nan")
+            feasible = float(row["raw_feasible_rate"]) == 1.0
+            row["raw_nontrivial_feasible_rate"] = (
+                1.0 if feasible and math.isfinite(utility) and utility > 0.0 else 0.0
+            )
+        out.append(row)
+    return out
 
 
 def contrast_seed(treatment, baseline, sampler, metric):
@@ -91,13 +115,14 @@ def bootstrap_mean_ci(blocks, seed):
     )
 
 
-def analyze_rows(rows, contrasts=None, restrict_to=None):
+def analyze_rows(rows, contrasts=None, restrict_to=None, metrics=None):
     """Paired summary rows, one per (contrast, sampler, metric).
 
     ``restrict_to`` is an optional set of ``(topology, instance_seed,
     n_requests)`` keys; when given, only those instances are analysed.
     """
     contrasts = CONTRASTS if contrasts is None else contrasts
+    metrics = METRICS if metrics is None else metrics
     matched = defaultdict(dict)
 
     for row in rows:
@@ -141,7 +166,7 @@ def analyze_rows(rows, contrasts=None, restrict_to=None):
             if float(row["raw_feasible_rate"]) not in {0.0, 1.0}:
                 raise ValueError(f"Archived call is not uniformly feasible/infeasible: {key}")
 
-            for _, column, _ in METRICS:
+            for _, column, _ in metrics:
                 if not math.isfinite(float(row[column])):
                     raise ValueError(f"Nonfinite {column}: {key}")
         instances[key[:-1]][key[-1]] = group
@@ -155,7 +180,7 @@ def analyze_rows(rows, contrasts=None, restrict_to=None):
         sampler = instance_key[-1]
 
         for treatment, baseline_arm in contrasts:
-            for metric, column, _ in METRICS:
+            for metric, column, _ in metrics:
                 baseline = statistics.fmean(
                     float(group[baseline_arm][column])
                     for group in seeded_groups.values()
@@ -170,7 +195,7 @@ def analyze_rows(rows, contrasts=None, restrict_to=None):
     summary_rows = []
     for treatment, baseline_arm in contrasts:
         for sampler in SAMPLERS:
-            for metric, _, lower_is_better in METRICS:
+            for metric, _, lower_is_better in metrics:
                 records = samples[(treatment, baseline_arm, sampler, metric)]
                 if not records:
                     raise ValueError(
@@ -288,6 +313,14 @@ def main():
     )
     write_csv(subset_path, subset_summary)
 
+    nontrivial = analyze_rows(
+        add_nontrivial_feasibility(rows), metrics=NONTRIVIAL_METRICS
+    )
+    write_csv(
+        os.path.join(results_dir, "heldout_paired_analysis_nontrivial.csv"),
+        nontrivial,
+    )
+
     reference = {
         (row["topology"], row["instance_seed"], row["n_requests"]): row
         for row in scan
@@ -359,6 +392,15 @@ def main():
         f"global-changed subset = {len(summary) + len(subset_summary)} in "
         f"total; no multiplicity correction applied."
     )
+    print()
+    for row in nontrivial:
+        print(
+            f"[non-trivial feasibility] {row['difference_definition']:42s} "
+            f"{row['sampler'].upper():3s} "
+            f"mean={row['mean_paired_difference']:+.6f} "
+            f"95% CI=[{row['bootstrap_95_ci_low']:+.6f}, "
+            f"{row['bootstrap_95_ci_high']:+.6f}]"
+        )
     print(f"Wrote {len(summary)} comparisons to {output_path}")
 
 

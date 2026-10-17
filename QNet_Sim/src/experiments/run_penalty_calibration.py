@@ -192,6 +192,9 @@ def summarize_response(
     """Aggregate raw and repaired statistics across all OpenJij reads."""
     n_reads = 0
     raw_feasible_reads = 0
+    # Feasible reads with positive utility. The empty selection is always
+    # feasible, so raw feasibility alone counts "admit nothing" as a success.
+    raw_nontrivial_feasible_reads = 0
     raw_request_conflicts: List[float] = []
     raw_edge_violations: List[float] = []
     raw_memory_violations: List[float] = []
@@ -212,6 +215,8 @@ def summarize_response(
 
         if raw_metrics["feasible"]:
             raw_feasible_reads += 1
+            if float(raw_metrics["utility"]) > 0.0:
+                raw_nontrivial_feasible_reads += 1
             raw_best_feasible_utility = max(
                 raw_best_feasible_utility,
                 float(raw_metrics["utility"]),
@@ -238,6 +243,7 @@ def summarize_response(
         return {
             "n_reads": 0,
             "raw_feasible_rate": 0.0,
+            "raw_nontrivial_feasible_rate": 0.0,
             "raw_mean_request_conflicts": math.nan,
             "raw_mean_edge_violations": math.nan,
             "raw_mean_memory_violations": math.nan,
@@ -250,6 +256,7 @@ def summarize_response(
     return {
         "n_reads": n_reads,
         "raw_feasible_rate": raw_feasible_reads / n_reads,
+        "raw_nontrivial_feasible_rate": raw_nontrivial_feasible_reads / n_reads,
         "raw_mean_request_conflicts": statistics.fmean(raw_request_conflicts),
         "raw_mean_edge_violations": statistics.fmean(raw_edge_violations),
         "raw_mean_memory_violations": statistics.fmean(raw_memory_violations),
