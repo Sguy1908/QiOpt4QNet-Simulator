@@ -42,11 +42,11 @@ Two dict views are used depending on how much detail a solver needs:
 ## Installation
 
 ```bash
-python3 -m venv .venv
+python3 -m venv .venv       # Python 3.10-3.13; the pins do not install on 3.14
 source .venv/bin/activate    # or .venv\Scripts\activate on Windows
 
 pip install -r requirements.txt        # core solvers (pinned)
-pip install "qiopt4qnet[baselines]"    # optional: CP-SAT oracle + ML ranking baseline
+pip install -e "QNet_Sim[baselines]"   # optional: CP-SAT oracle + ML ranking baseline
 pip install pytest                     # only needed for the test suite
 ```
 
@@ -137,7 +137,8 @@ the fidelity effect is small (utility -0.1 / -1.7 / -6.1 % across the paper's th
 operating points), but at 2.0 V / 1.6 ns a security-blind allocator routes 6.0 of
 7.45 admitted requests over insecure links, and a security-aware one admits only
 2.0 of 7.75. A 10 dB band-pass filter on the emission removes the penalty. The
-write-up is `paper/qiopt4qnet_npj.tex` (npj-style: Results / Discussion / Methods).
+npj-style write-up of this study (`paper/qiopt4qnet_npj.tex`) was removed in
+commit `48213bf`; retrieve it from git history if needed.
 
 ## Classical baselines (`baselines/`)
 
