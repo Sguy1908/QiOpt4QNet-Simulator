@@ -55,7 +55,7 @@ def main():
     print(f"Bundles loaded into optimizer: {len(optimizer.bundles)}")
 
     # Build BQM and solve using OpenJij Simulated Annealing (SA)
-    bqm = optimizer.to_bqm()
+    bqm = optimizer.to_bqm(congestion_penalty=0.05, memory_congestion_penalty=0.05)
     sa_response = solve_sa(bqm, num_reads=50)
     selected = optimizer.decode_sample(sa_response.first.sample)
 
