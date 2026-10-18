@@ -28,12 +28,14 @@ Run from ``QNet_Sim`` (about 1.5 h on 8 processes for all 1,078 instances):
 Outputs in ``results/penalty_calibration/``: ``sampler_check_runs.csv`` (one
 row per instance, arm and sampler), ``sampler_check_levels.csv`` (mean of each
 metric per arm) and ``sampler_check_summary.csv`` (paired contrasts with
-generation-seed-block bootstrap intervals).
+generation-seed-block bootstrap intervals). ``--from-runs`` rebuilds the two
+summaries from an existing ``sampler_check_runs.csv`` without re-solving.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import math
 import multiprocessing
@@ -82,6 +84,7 @@ SOLVER_SEED = 101
 # (treatment, baseline)
 CONTRASTS = [
     ("resource_aware_per", "conventional"),
+    ("resource_aware_per", "resource_aware"),
     ("resource_aware", "conventional"),
     ("local_utility", "conventional"),
     ("resource_aware_per", "local_utility"),
@@ -256,35 +259,20 @@ def main(argv=None):
             )
         ),
     )
+    parser.add_argument(
+        "--from-runs",
+        action="store_true",
+        help="re-summarize <out-dir>/sampler_check_runs.csv instead of solving",
+    )
     args = parser.parse_args(argv)
-
-    topology_names = [name for name, _ in _topology_cases(True)]
-    triples = sample_instances(
-        topology_names,
-        INSTANCE_SEEDS,
-        REQUEST_COUNTS,
-        None if args.full else args.n_instances,
-    )
-    if args.workers > 1:
-        shards = [triples[i :: args.workers] for i in range(args.workers)]
-        with multiprocessing.get_context("spawn").Pool(args.workers) as pool:
-            rows = [
-                r for shard in pool.map(_run_shard, shards, chunksize=1) for r in shard
-            ]
+    runs_path = os.path.join(args.out_dir, "sampler_check_runs.csv")
+    if args.from_runs:
+        with open(runs_path, newline="") as f:
+            rows = list(csv.DictReader(f))
     else:
-        rows = run_instances(dict(_topology_cases(True)), triples)
-    rows.sort(
-        key=lambda r: (
-            r["topology"],
-            r["instance_seed"],
-            r["n_requests"],
-            r["arm"],
-            r["sampler"],
-        )
-    )
-
-    os.makedirs(args.out_dir, exist_ok=True)
-    _write_csv(os.path.join(args.out_dir, "sampler_check_runs.csv"), rows)
+        rows = _solve(args)
+        os.makedirs(args.out_dir, exist_ok=True)
+        _write_csv(runs_path, rows)
     summary = summarize(rows)
     _write_csv(
         os.path.join(args.out_dir, "sampler_check_levels.csv"),
@@ -312,6 +300,34 @@ def main(argv=None):
             )
     if any(math.isnan(float(r["repaired_optimality_gap_pct"])) for r in rows):
         print("warning: some repaired gaps are NaN")
+
+
+def _solve(args):
+    topology_names = [name for name, _ in _topology_cases(True)]
+    triples = sample_instances(
+        topology_names,
+        INSTANCE_SEEDS,
+        REQUEST_COUNTS,
+        None if args.full else args.n_instances,
+    )
+    if args.workers > 1:
+        shards = [triples[i :: args.workers] for i in range(args.workers)]
+        with multiprocessing.get_context("spawn").Pool(args.workers) as pool:
+            rows = [
+                r for shard in pool.map(_run_shard, shards, chunksize=1) for r in shard
+            ]
+    else:
+        rows = run_instances(dict(_topology_cases(True)), triples)
+    rows.sort(
+        key=lambda r: (
+            r["topology"],
+            r["instance_seed"],
+            r["n_requests"],
+            r["arm"],
+            r["sampler"],
+        )
+    )
+    return rows
 
 
 if __name__ == "__main__":

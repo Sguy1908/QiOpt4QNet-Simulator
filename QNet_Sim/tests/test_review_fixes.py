@@ -9,6 +9,7 @@ import pytest
 
 from experiments.analyze_penalty_calibration_heldout import add_nontrivial_feasibility
 from experiments.run_penalty_calibration import summarize_response
+from experiments.run_penalty_calibration_sampler_check import ARMS, SAMPLERS, summarize
 from optimization.openjij_solver import build_calibrated_bqm, calibrated_coefficients
 from optimization.proposed_calibrator import pairwise_request_penalties
 from optimization.qubo_optimizer import QUBOOptimizer
@@ -224,3 +225,32 @@ def test_archived_rows_get_nontrivial_feasibility():
     ]
     out = [r["raw_nontrivial_feasible_rate"] for r in add_nontrivial_feasibility(rows)]
     assert out == [0.0, 1.0, 0.0]
+
+
+def _sampler_check_rows():
+    rng = random.Random(3)
+    rows = []
+    for seed, n_requests, arm, sampler in itertools.product(
+        range(4), (8, 16), ARMS, SAMPLERS
+    ):
+        rows.append(
+            {
+                "topology": "chain8_c4",
+                "instance_seed": seed,
+                "n_requests": n_requests,
+                "arm": arm,
+                "sampler": sampler,
+                "raw_feasible_rate": rng.random(),
+                "raw_nontrivial_feasible_rate": rng.random(),
+                "repaired_optimality_gap_pct": 10 * rng.random(),
+                "raw_mean_overload_units": rng.random(),
+                "raw_mean_request_conflicts": rng.random(),
+            }
+        )
+    return rows
+
+
+def test_sampler_check_summary_is_the_same_from_csv_strings():
+    rows = _sampler_check_rows()
+    as_csv = [{k: str(v) for k, v in row.items()} for row in rows]
+    assert summarize(as_csv, n_boot=50) == summarize(rows, n_boot=50)
