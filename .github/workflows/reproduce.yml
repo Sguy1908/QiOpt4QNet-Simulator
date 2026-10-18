@@ -25,7 +25,7 @@ jobs:
       run:
         working-directory: QNet_Sim
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
@@ -65,7 +65,7 @@ jobs:
       OMP_NUM_THREADS: "1"
       PYTHONPATH: src
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
