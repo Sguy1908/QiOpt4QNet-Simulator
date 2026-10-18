@@ -1,0 +1,81 @@
+name: reproduce
+
+# Regenerates the deterministic result files that no other job exercises and
+# fails if they drift from the committed copies. A change that is meant to
+# alter one of these files must commit the regenerated file in the same PR.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "QNet_Sim/src/**"
+      - "QNet_Sim/results/experiments/risk_gain_tradeoff.csv"
+      - "QNet_Sim/results/experiments/hardware_profile_comparison.csv"
+      - "QNet_Sim/pyproject.toml"
+      - ".github/workflows/reproduce.yml"
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    env:
+      OMP_NUM_THREADS: "1"
+      PYTHONPATH: src
+    defaults:
+      run:
+        working-directory: QNet_Sim
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: QNet_Sim/pyproject.toml
+      # These generators need only the core dependencies (the `test` group adds
+      # just pytest); the project has no package to `pip install .`.
+      - name: Install dependencies
+        working-directory: .
+        run: python .github/scripts/pyproject_deps.py test > /tmp/requirements.txt && pip install -r /tmp/requirements.txt
+      - name: hardware_profile_comparison.csv
+        run: python src/hardware/profiles.py
+      # time_dependent_optimizer.py's __main__ also writes time_dependent_slots.csv,
+      # which records wall-clock timings, so only the deterministic sweep runs here.
+      - name: risk_gain_tradeoff.csv
+        run: |
+          python - <<'PY'
+          from experiments.instances import generate_chain_topology
+          from optimization.time_dependent_optimizer import run_risk_gain_sweep
+
+          def topo():
+              return generate_chain_topology(n_nodes=8, edge_capacity=6, memory_capacity=10,
+                                             raw_fidelity=0.85, latency=5.0)
+
+          run_risk_gain_sweep(topo, n_slots=20, mean_rate=1.5, tau_mem=5.0,
+                              out_dir="results/experiments")
+          PY
+      - name: committed results are unchanged
+        run: git diff --exit-code -- results/
+
+  sampler-check-smoke:
+    # Two instances of the penalty-calibration sampler check, written to a
+    # scratch directory: catches crashes in the runner and the calibration arms
+    # without the 1.5 h full cohort.
+    runs-on: ubuntu-latest
+    env:
+      OMP_NUM_THREADS: "1"
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: QNet_Sim/pyproject.toml
+      - name: Install dependencies (no torch; the runner does not use it)
+        run: |
+          python .github/scripts/pyproject_deps.py all | grep -v '^torch' > /tmp/requirements.txt
+          pip install -r /tmp/requirements.txt
+      - name: run_penalty_calibration_sampler_check.py --n-instances 2
+        working-directory: QNet_Sim
+        run: python src/experiments/run_penalty_calibration_sampler_check.py --n-instances 2 --out-dir "$RUNNER_TEMP/sampler_check"
+      - run: ls -l "$RUNNER_TEMP/sampler_check"
