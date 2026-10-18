@@ -42,14 +42,19 @@
 % AUTHOR METADATA
 % --------------------------------------------------------------------------
 \author*[1]{\fnm{Joshua} \sur{Tom}}\email{joshuatom777@gmail.com}
-\author*[2]{\fnm{Arnav} \sur{Kapoor}}
-\author*[3]{\fnm{J Abishek} \sur{Rufus Raj}}
-\author*[4]{\fnm{Shlok} \sur{Goenka}}
-\author*[5]{\fnm{Manya} \sur{Ahuja}}
+\author[2]{\fnm{Arnav} \sur{Kapoor}}
+\author[3]{\fnm{J Abishek} \sur{Rufus Raj}}
+\author[4]{\fnm{Shlok} \sur{Goenka}}
+\author[5]{\fnm{Manya} \sur{Ahuja}}
 \author[6]{\fnm{Krishna} \sur{Bhatia}}
 \author[6]{\fnm{Shalini} \sur{Devendrababu}}
 
 \affil*[1]{\orgname{Affiliation to be added}, \orgaddress{\country{Country}}}
+\affil[2]{\orgname{Affiliation to be added}, \orgaddress{\country{Country}}}
+\affil[3]{\orgname{Affiliation to be added}, \orgaddress{\country{Country}}}
+\affil[4]{\orgname{Affiliation to be added}, \orgaddress{\country{Country}}}
+\affil[5]{\orgname{Affiliation to be added}, \orgaddress{\country{Country}}}
+\affil[6]{\orgname{Affiliation to be added}, \orgaddress{\country{Country}}}
 
 \abstract{Routing in a quantum network has to account for entanglement fidelity, probabilistic generation and swapping, the cost of purification, finite memories and the chance that a delivered state misses its fidelity target. We treat concurrent entanglement requests as a selection problem: each request chooses at most one path-purification bundle, subject to edge and memory capacities. On physics-based synthetic networks we compare exact, heuristic, tensor-network and annealing solvers. CP-SAT, adaptive large-neighborhood search, parallel tempering and a tensor-network-initialized hybrid reach the reference utility in the exact and medium regimes, while a calibrated OpenJij simulated-quantum-annealing (SQA) ensemble stays 39 to 50\% below it. Screening bundles with a chance constraint lowers the out-of-sample fidelity-SLA violation rate from 16.3\% to 6.0\% and costs 6.9\% of optimization utility. For the QUBO form of the problem we derive one penalty coefficient per edge and per memory from the loads that other requests can actually place on that resource. With zero soft-congestion weights these coefficients keep the constrained optimum as the ground state. Over 1,080 generated instances they lower the mean edge and memory coefficients by 49.5\% and 46.3\%. In 32,340 matched runs on the 1,078 instances with at least one tighter coefficient, they raise the simulated-annealing (SA) feasible-read rate by 12.0 percentage points and cut its repaired reference gap by 10.8 points; for SQA the gains are 7.6 and 6.8 points. Almost all of the gain comes from keeping the coefficient local to each resource, and per-resource calibration slightly increases raw SQA overload. Annealing remains well behind the classical solvers, and no quantum speedup is claimed.}
 
@@ -73,7 +78,7 @@ We present \emph{QiOpt4QNet}, a framework for allocating concurrent entanglement
 
 The paper makes four contributions.
 \begin{enumerate}[label=(\roman*)]
-\item An allocation model over routes, purification and memory. Every instance is exported with its physical parameters, and the fidelity and swap formulas agree with independent density-matrix calculations to within $5\times10^{-16}$.
+\item An allocation model over routes, purification and memory in which every solver receives the same screened candidate table, and every instance is exported with its physical parameters.
 \item A regime-by-regime solver comparison. CP-SAT, ALNS, the hybrid and parallel tempering reach the reference on the exact and medium problems. Boundary tensor-network compression shows a width-quality-runtime trade-off, and a true-MPS ablation with fallback disabled shows that quality does not improve monotonically with bond dimension.
 \item An out-of-sample test of nominal, risk-weighted and chance-constrained policies on a Monte Carlo stream that is independent of the one used to build them.
 \item A per-resource QUBO calibration with a ground-state guarantee for zero soft-congestion weights. In 1,080 generated instances (1,078 evaluated, 32,340 SA and SQA runs) it improves SA feasibility and repaired quality substantially and SQA less. A direct comparison with a global version of the same rule shows that the local scope of the coefficient accounts for nearly all of the gain.
@@ -128,7 +133,7 @@ Each request $r\in\Rset$ has a source, a destination, a priority $w_r$ and a min
 \end{align}
 Because the physics lives in the bundle table, the evaluator can be replaced without touching the optimizer, and every solver sees the same candidates and capacities.
 
-The screening model is analytic and makes no claim to simulate specific hardware. Elementary generation probability falls with fiber attenuation and includes source, coupling and detector efficiencies. Purification follows the BBPSSW recurrence\cite{bennett1996}. One round on a Werner-like link of fidelity $F$ succeeds with probability
+The screening model is analytic and makes no claim to simulate specific hardware. Elementary generation probability falls with fiber attenuation and includes source, coupling and detector efficiencies. Purification follows the BBPSSW recurrence\cite{bennett1996}. One round on a Werner-like link\cite{werner1989} of fidelity $F$ succeeds with probability
 \begin{equation}
  p_{\mathrm{pur}}(F)=F^2+\frac{2F(1-F)}{3}+5\left(\frac{1-F}{3}\right)^2,
 \end{equation}
@@ -411,7 +416,7 @@ with $\Delta_{j,b}$ evaluated at that smallest reachable violating co-load. Edge
 \begin{proposition}[Ground-state sufficiency]\label{prop:ground}
 Assume non-negative integer demands and capacities, at most one bundle per request, zero soft-congestion weights ($C=E=0$), and coefficients given by Eq.~\ref{eq:resourceB} with $\eps>0$. Then every global minimum of the QUBO energy satisfies the edge and memory capacity constraints, and, with $A>P_0$, contains no request conflict. The ground state therefore attains the constrained optimal utility.
 \end{proposition}
-\noindent\textit{Proof sketch.} Suppose a state violates resource $j$. Pick a selected bundle $b$ that contributes to the violation and whose request-conditioned co-load is reachable. Removing $b$ loses at most $u_b^+$ of objective but lowers the penalty on $j$ by $B_j\Delta_{j,b}>u_b^+$, and it cannot raise the load on any other resource. The new state has strictly lower energy, so no infeasible state is a global minimum. A request with two selected bundles can likewise lower its energy by dropping one, because the pairwise conflict penalty exceeds the largest positive utility. $\square$
+\noindent\textit{Proof sketch.} For a fixed bundle assignment the slack variables can represent every integer in $[0,C_j]$, so minimizing over them turns each capacity term into $B_j[\max(0,L_j-C_j)]^2$ for load $L_j$; it suffices to compare these slack-minimized energies. First, a state in which some request selects two or more bundles is not a global minimum: dropping one of them removes at least one pairwise conflict term, worth $A>P_0\ge u_b^+$, and cannot raise any capacity penalty because demands are non-negative. So every global minimum selects at most one bundle per request, and the co-load of any selected bundle $b$ on resource $j$ is then reachable in the sense of $\mathcal{L}_{j,-r(b)}$. Second, suppose such a state overloads $j$, and pick a selected $b$ with $d_{jb}>0$. Its co-load $\ell$ is reachable and violating, so $\ell$ is at least the smallest reachable violating co-load, and because $\Delta_{j,b}(\ell)$ is non-decreasing in $\ell$ once $\ell+d_{jb}>C_j$, removing $b$ lowers the penalty on $j$ by at least $B_j\Delta_{j,b}>u_b^+$ while losing at most $u_b^+$ of objective and raising no other penalty. The state therefore has a strictly lower-energy neighbour. Every global minimum is feasible, and among feasible states the energy equals minus the utility. $\square$
 
 \begin{remark}
 The condition $C=E=0$ is needed for the last statement. Soft congestion terms penalize feasible loads, so with positive weights the ground state need not be utility-optimal, and we claim no optimality guarantee in that case. All calibration experiments use $C=E=0$.
@@ -422,6 +427,12 @@ For each resource and candidate bundle, a bounded dynamic program builds the loa
 H_{\mathrm{edge}}&=\sum_{e\in\Eset}B_e\left(\sum_bd_{eb}x_b+s_e-C_e\right)^2,\\
 H_{\mathrm{mem}}&=\sum_{v\in\Vset}D_v\left(\sum_bm_{vb}x_b+t_v-M_v\right)^2.
 \end{align}
+
+\subsection{Calibration instances and sampler settings}
+
+The calibration instances are generated by the bundle model of the QiOpt4QNet repository, which is simpler than the screening model used for the benchmark and reliability studies. Every link of a configuration has the same raw fidelity and generation probability ($0.85$ and $0.95$ for the 8-node chain and the $3\times3$ grid, $0.88$ and $0.90$ for the 10-node chain and the $4\times4$ grid), a length of 25 km and a latency of 5 units. Each request receives $k=3$ candidate paths, and each path is expanded with one purification depth $q\in\{0,1,2\}$ applied to all of its links. A link at depth $q$ demands $2^q$ Bell pairs; its success probability is $p_{\mathrm{gen}}^{2^q}$ times the BBPSSW success probabilities of the rounds, end-to-end fidelity follows the Werner swap composition without operation noise, and there is no storage decoherence. The utility is $w_rp_b[1+\max(F_b-F_r^{\min},0)]-0.01L_b-0.05N_b$. The coefficient rules use only the bundle table, so this choice affects the calibration study only through the instances it produces.
+
+OpenJij samplers run with their defaults: SA with 1000 sweeps and a $\beta$ range set automatically from the coefficients of each QUBO, and SQA with $\beta=5$, $\Gamma=1$, 1000 sweeps and four Trotter slices. Because the SQA inverse temperature is fixed in absolute units, rescaling the penalty coefficients also changes its effective temperature. Repair is drop-only: it keeps the highest-utility selected bundle of each request, admits the kept bundles in decreasing order of utility while they fit, and never adds a bundle the sampler did not select. The repaired gap therefore measures the content of the sampled state, not the quality of a repair heuristic.
 
 \subsection{Calibration experiment and statistics}
 
@@ -437,7 +448,7 @@ The benchmark has six regimes. Exact and medium regimes use ten seeds and large 
 
 \subsection{Software and reproducibility}
 
-The frozen manuscript package contains source code, unit tests, environment metadata, hashes, final result files and provenance records. The penalty-calibration results are regenerated from the repository with the commands listed in \texttt{QNet\_Sim/results/README.md}: \texttt{run\_penalty\_calibration\_heldout.py} for the coefficient scan and solver runs and \texttt{analyze\_penalty\_calibration\_heldout.py} for the paired analysis. Every figure is regenerated from the files in \texttt{SOURCE\_DATA} by \texttt{figures/make\_figures.py}. An incomplete topology-generalization run and an incomplete Rosales extension are excluded from all quantitative claims. OpenJij SQA runs as a classical sampler; no quantum processor was used.
+The frozen manuscript package contains source code, unit tests, environment metadata, hashes, final result files and provenance records. The penalty-calibration results are regenerated from the repository with the commands listed in \texttt{QNet\_Sim/results/README.md}: \texttt{run\_penalty\_calibration\_heldout.py} for the coefficient scan and solver runs, \texttt{analyze\_penalty\_calibration\_heldout.py} for the paired analysis, and \texttt{run\_penalty\_calibration\_sampler\_check.py} for the sampler-configuration check and the scope ablations. Every figure is regenerated from the files in \texttt{SOURCE\_DATA} by \texttt{figures/make\_figures.py}. An incomplete topology-generalization run and an incomplete Rosales extension are excluded from all quantitative claims. OpenJij SQA runs as a classical sampler; no quantum processor was used.
 
 Large-language-model assistance was used for editing and organizing the manuscript text. All scientific claims, numerical values, methods and references were checked against the frozen project artifacts and the primary literature. The authors should review this statement against the journal's policy at submission.
 
@@ -466,7 +477,6 @@ Competing interests will be confirmed by all authors before submission. If there
 \bibitem{azuma2023} Azuma, K. \textit{et al.} Quantum repeaters: From quantum networks to the quantum internet. \textit{Rev. Mod. Phys.} \textbf{95}, 045006 (2023). doi:10.1103/RevModPhys.95.045006.
 \bibitem{bennett1996} Bennett, C. H. \textit{et al.} Purification of Noisy Entanglement and Faithful Teleportation via Noisy Channels. \textit{Phys. Rev. Lett.} \textbf{76}, 722--725 (1996). doi:10.1103/PhysRevLett.76.722.
 \bibitem{werner1989} Werner, R. F. Quantum states with Einstein--Podolsky--Rosen correlations admitting a hidden-variable model. \textit{Phys. Rev. A} \textbf{40}, 4277--4281 (1989). doi:10.1103/PhysRevA.40.4277.
-\bibitem{horodecki2009} Horodecki, R., Horodecki, P., Horodecki, M. \& Horodecki, K. Quantum entanglement. \textit{Rev. Mod. Phys.} \textbf{81}, 865--942 (2009). doi:10.1103/RevModPhys.81.865.
 \bibitem{pant2019} Pant, M. \textit{et al.} Routing entanglement in the quantum internet. \textit{npj Quantum Inf.} \textbf{5}, 25 (2019). doi:10.1038/s41534-019-0139-x.
 \bibitem{li2021} Li, C., Li, T., Liu, Y.-X. \& Cappellaro, P. Effective routing design for remote entanglement generation on quantum networks. \textit{npj Quantum Inf.} \textbf{7}, 10 (2021). doi:10.1038/s41534-020-00344-4.
 \bibitem{halder2024} Halder, J. \textit{et al.} Optimal routing and end-to-end entanglement distribution in quantum networks. \textit{Sci. Rep.} \textbf{14}, 19262 (2024). doi:10.1038/s41598-024-70114-1.

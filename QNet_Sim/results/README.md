@@ -14,21 +14,27 @@ disagree, the generator is authoritative.
 | Most of `experiments/*.csv` | `PYTHONPATH=src python src/experiments/experiment_suite.py` (run from `main()`, one `run_*_experiments` function per file) |
 | `experiments/scaling_curves.csv`, `scaling_law_summary.json` | `PYTHONPATH=src python src/experiments/scaling_analysis.py` |
 | `experiments/constrained_mps_comparison.csv` | `PYTHONPATH=src python src/optimization/constrained_mps.py` |
-| `experiments/time_dependent_slots.csv` | `PYTHONPATH=src python src/optimization/time_dependent_optimizer.py` |
+| `experiments/time_dependent_slots.csv`, `experiments/risk_gain_tradeoff.csv` | `PYTHONPATH=src python src/optimization/time_dependent_optimizer.py` |
 | `experiments/hardware_profile_comparison.csv` | `PYTHONPATH=src python src/hardware/profiles.py` |
 | `experiments/hardware_literature_validation.csv` | `experiment_suite.py`, or `PYTHONPATH=src python src/hardware/literature_validation.py` |
 | `experiments/qlearning_comparison.csv`, `rl_topology_generalization.csv` | `experiment_suite.py`, or `PYTHONPATH=src python src/baselines/qlearning_router.py` |
 | `experiments/parasitic_*.csv`, `experiments/figures/parasitic_*.png` | `python experiments/run_parasitic_emission.py` |
 | `experiments/figures/*.png`, `experiments/figures/summary_tables.txt` | `PYTHONPATH=src python src/experiments/plot_results.py` (reads the CSVs above) |
 | `penalty_calibration/heldout_coefficient_scan.csv`, `heldout_tightening_solver_*.csv` | `PYTHONPATH=src python src/experiments/run_penalty_calibration_heldout.py` (`--scan-only` for the scan alone) |
-| `penalty_calibration/heldout_paired_analysis.csv`, `heldout_paired_analysis_global_changed.csv` | `PYTHONPATH=src python src/experiments/analyze_penalty_calibration_heldout.py` |
+| `penalty_calibration/heldout_paired_analysis.csv`, `heldout_paired_analysis_global_changed.csv`, `heldout_paired_analysis_nontrivial.csv` | `PYTHONPATH=src python src/experiments/analyze_penalty_calibration_heldout.py` |
+| `penalty_calibration/sampler_check_runs.csv`, `sampler_check_levels.csv`, `sampler_check_summary.csv` | `PYTHONPATH=src python src/experiments/run_penalty_calibration_sampler_check.py --full --workers 8` |
 | `penalty_calibration/heldout_mechanism_analysis.csv` | `PYTHONPATH=src python src/experiments/analyze_penalty_calibration_mechanism.py` |
 | `penalty_calibration/figures/figure*.pdf`, `.png` | `PYTHONPATH=src python src/experiments/plot_penalty_calibration_heldout.py` |
 
-**Known gap:** `experiments/risk_gain_tradeoff.csv` is read by `plot_results.py`
-(figure `risk_tradeoff.png`) but no script in the repository writes it, so it
-cannot currently be regenerated. `time_dependent_optimizer.py` has a
-`risk_gain` parameter and is the likely origin; it has not been confirmed.
+`experiments/risk_gain_tradeoff.csv` used to have no generator.
+`run_risk_gain_sweep` in `time_dependent_optimizer.py` now writes it; it
+reproduces the archived served counts and utilities exactly, which confirms
+the parameters. Its delivered-fidelity columns changed with the Werner
+memory-decay fix (the old values, about 0.19, were below the physical floor
+of 1/4) and are now 0.25 in every row: with `tau_mem = 5` the modelled hold
+times fully decohere every pair, so that column carries no information in
+this configuration. `hardware_profile_comparison.csv` was regenerated for the
+same fix; it was also stale against the T1/T2 values in `hardware/profiles.py`.
 
 `run_penalty_calibration_budget.py` writes `penalty_calibration/budget_sensitivity_runs.csv`
 and `budget_sensitivity_summary.csv` (solver-budget sensitivity; see
