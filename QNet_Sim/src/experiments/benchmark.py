@@ -2,9 +2,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import time
-import random
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional
 
 from optimization.metropolis_annealer import MetropolisAnnealer
 from optimization.tensor_network_optimizer import TensorNetworkOptimizer
@@ -20,10 +18,8 @@ try:
 except ImportError:
     _HAS_PYQUBO = False
 
-from optimization.physics_hamiltonian import PhysicalHamiltonian
 from experiments.instances import (
-    generate_chain_topology, generate_grid_topology,
-    generate_benchmark_instance, contention_sweep_instances,
+    generate_chain_topology, contention_sweep_instances,
 )
 from experiments.metrics import ExperimentTracker
 

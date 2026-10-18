@@ -7,7 +7,8 @@
 4. Path validity across all selected bundles
 5. Metropolis vs MPS consistency on small instances
 """
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
 from collections import defaultdict

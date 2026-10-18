@@ -79,7 +79,6 @@ class TimeDependentAnnealer:
     def __init__(self, edge_capacities: dict, memory_capacities: dict,
                  tau_mem: float = 5.0, base_risk_weight: float = 2.0,
                  n_slots: int = 30, seed: Optional[int] = None):
-        from optimization.streaming_annealer import StreamingAnnealer
         self.edge_capacities = edge_capacities
         self.memory_capacities = memory_capacities
         self.tau_mem = tau_mem

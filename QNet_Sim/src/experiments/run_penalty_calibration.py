@@ -30,7 +30,7 @@ import statistics
 import sys
 import time
 from collections import Counter, defaultdict
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 

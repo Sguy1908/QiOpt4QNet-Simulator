@@ -122,30 +122,42 @@ def run_instances(topologies, triples, log=print):
             continue
         oracle, optimal, status = _oracle_result(bundles, edge_caps, mem_caps)
         if not optimal:
-            raise RuntimeError(f"CP-SAT did not certify {topology} {instance_seed} {n_requests}: {status}")
+            raise RuntimeError(
+                f"CP-SAT did not certify {topology} {instance_seed} {n_requests}: {status}"
+            )
         for arm, (strategy, pairwise) in ARMS.items():
             bqm, _ = build_calibrated_bqm(
                 optimizer, strategy, pairwise_request_penalty=pairwise
             )
             for sampler in SAMPLERS:
                 stats = summarize_response(
-                    optimizer, sample(sampler, bqm, SOLVER_SEED), bundles, edge_caps, mem_caps
+                    optimizer,
+                    sample(sampler, bqm, SOLVER_SEED),
+                    bundles,
+                    edge_caps,
+                    mem_caps,
                 )
-                rows.append({
-                    "topology": topology,
-                    "instance_seed": instance_seed,
-                    "n_requests": n_requests,
-                    "arm": arm,
-                    "sampler": sampler,
-                    "solver_seed": SOLVER_SEED,
-                    "reads": READS,
-                    "sa_sweeps": SA_SWEEPS if sampler == "sa" else "",
-                    "bqm_variables": bqm.num_variables,
-                    "oracle_utility": oracle,
-                    **stats,
-                    "repaired_optimality_gap_pct": _gap_pct(oracle, stats["repaired_best_utility"]),
-                })
-        log(f"[{index}/{len(triples)}] {topology} seed={instance_seed} req={n_requests}")
+                rows.append(
+                    {
+                        "topology": topology,
+                        "instance_seed": instance_seed,
+                        "n_requests": n_requests,
+                        "arm": arm,
+                        "sampler": sampler,
+                        "solver_seed": SOLVER_SEED,
+                        "reads": READS,
+                        "sa_sweeps": SA_SWEEPS if sampler == "sa" else "",
+                        "bqm_variables": bqm.num_variables,
+                        "oracle_utility": oracle,
+                        **stats,
+                        "repaired_optimality_gap_pct": _gap_pct(
+                            oracle, stats["repaired_best_utility"]
+                        ),
+                    }
+                )
+        log(
+            f"[{index}/{len(triples)}] {topology} seed={instance_seed} req={n_requests}"
+        )
     return rows
 
 
@@ -162,7 +174,12 @@ def summarize(rows, n_boot=10000):
     """Absolute levels per arm and paired contrasts with seed-block bootstrap CIs."""
     by_key = defaultdict(dict)
     for row in rows:
-        key = (row["topology"], int(row["instance_seed"]), int(row["n_requests"]), row["sampler"])
+        key = (
+            row["topology"],
+            int(row["instance_seed"]),
+            int(row["n_requests"]),
+            row["sampler"],
+        )
         by_key[key][row["arm"]] = row
     for key, arms in by_key.items():
         if set(arms) != set(ARMS):
@@ -172,35 +189,57 @@ def summarize(rows, n_boot=10000):
     for sampler in SAMPLERS:
         cells = [arms for key, arms in by_key.items() if key[3] == sampler]
         for arm in ARMS:
-            out.append({
-                "kind": "level", "sampler": sampler, "treatment": arm, "baseline": "",
-                "n_instances": len(cells),
-                **{metric: statistics.fmean(float(c[arm][metric]) for c in cells)
-                   for metric, _ in METRICS},
-            })
+            out.append(
+                {
+                    "kind": "level",
+                    "sampler": sampler,
+                    "treatment": arm,
+                    "baseline": "",
+                    "n_instances": len(cells),
+                    **{
+                        metric: statistics.fmean(float(c[arm][metric]) for c in cells)
+                        for metric, _ in METRICS
+                    },
+                }
+            )
         for treatment, baseline in CONTRASTS:
             for metric, lower_is_better in METRICS:
                 blocks = defaultdict(list)
                 for key, arms in by_key.items():
                     if key[3] != sampler:
                         continue
-                    diff = float(arms[treatment][metric]) - float(arms[baseline][metric])
+                    diff = float(arms[treatment][metric]) - float(
+                        arms[baseline][metric]
+                    )
                     blocks[key[1]].append(diff)
                 values = [v for block in blocks.values() for v in block]
-                rng = np.random.default_rng(_contrast_seed(sampler, treatment, baseline, metric))
+                rng = np.random.default_rng(
+                    _contrast_seed(sampler, treatment, baseline, metric)
+                )
                 low, high = block_bootstrap_ci(blocks, rng, n_boot)
                 direction = -1.0 if lower_is_better else 1.0
-                out.append({
-                    "kind": "contrast", "sampler": sampler, "treatment": treatment,
-                    "baseline": baseline, "metric": metric,
-                    "n_instances": len(values), "n_seed_blocks": len(blocks),
-                    "mean_paired_difference": statistics.fmean(values),
-                    "bootstrap_95_ci_low": low, "bootstrap_95_ci_high": high,
-                    "treatment_better_fraction":
-                        sum(direction * v > 1e-12 for v in values) / len(values),
-                    "baseline_better_fraction":
-                        sum(direction * v < -1e-12 for v in values) / len(values),
-                })
+                out.append(
+                    {
+                        "kind": "contrast",
+                        "sampler": sampler,
+                        "treatment": treatment,
+                        "baseline": baseline,
+                        "metric": metric,
+                        "n_instances": len(values),
+                        "n_seed_blocks": len(blocks),
+                        "mean_paired_difference": statistics.fmean(values),
+                        "bootstrap_95_ci_low": low,
+                        "bootstrap_95_ci_high": high,
+                        "treatment_better_fraction": sum(
+                            direction * v > 1e-12 for v in values
+                        )
+                        / len(values),
+                        "baseline_better_fraction": sum(
+                            direction * v < -1e-12 for v in values
+                        )
+                        / len(values),
+                    }
+                )
     return out
 
 
@@ -209,39 +248,68 @@ def main(argv=None):
     parser.add_argument("--full", action="store_true", help="every held-out instance")
     parser.add_argument("--n-instances", type=int, default=40)
     parser.add_argument("--workers", type=int, default=1)
-    parser.add_argument("--out-dir", default=os.path.abspath(os.path.join(
-        os.path.dirname(__file__), "..", "..", "results", "penalty_calibration")))
+    parser.add_argument(
+        "--out-dir",
+        default=os.path.abspath(
+            os.path.join(
+                os.path.dirname(__file__), "..", "..", "results", "penalty_calibration"
+            )
+        ),
+    )
     args = parser.parse_args(argv)
 
     topology_names = [name for name, _ in _topology_cases(True)]
     triples = sample_instances(
-        topology_names, INSTANCE_SEEDS, REQUEST_COUNTS,
+        topology_names,
+        INSTANCE_SEEDS,
+        REQUEST_COUNTS,
         None if args.full else args.n_instances,
     )
     if args.workers > 1:
-        shards = [triples[i::args.workers] for i in range(args.workers)]
+        shards = [triples[i :: args.workers] for i in range(args.workers)]
         with multiprocessing.get_context("spawn").Pool(args.workers) as pool:
-            rows = [r for shard in pool.map(_run_shard, shards, chunksize=1) for r in shard]
+            rows = [
+                r for shard in pool.map(_run_shard, shards, chunksize=1) for r in shard
+            ]
     else:
         rows = run_instances(dict(_topology_cases(True)), triples)
-    rows.sort(key=lambda r: (r["topology"], r["instance_seed"], r["n_requests"], r["arm"], r["sampler"]))
+    rows.sort(
+        key=lambda r: (
+            r["topology"],
+            r["instance_seed"],
+            r["n_requests"],
+            r["arm"],
+            r["sampler"],
+        )
+    )
 
     os.makedirs(args.out_dir, exist_ok=True)
     _write_csv(os.path.join(args.out_dir, "sampler_check_runs.csv"), rows)
     summary = summarize(rows)
-    _write_csv(os.path.join(args.out_dir, "sampler_check_levels.csv"),
-               [r for r in summary if r["kind"] == "level"])
-    _write_csv(os.path.join(args.out_dir, "sampler_check_summary.csv"),
-               [r for r in summary if r["kind"] == "contrast"])
+    _write_csv(
+        os.path.join(args.out_dir, "sampler_check_levels.csv"),
+        [r for r in summary if r["kind"] == "level"],
+    )
+    _write_csv(
+        os.path.join(args.out_dir, "sampler_check_summary.csv"),
+        [r for r in summary if r["kind"] == "contrast"],
+    )
     for row in summary:
         if row["kind"] == "level":
-            print(f"{row['sampler']:3s} {row['treatment']:26s} feas={row['raw_feasible_rate']:.3f} "
-                  f"nontrivial={row['raw_nontrivial_feasible_rate']:.3f} "
-                  f"gap={row['repaired_optimality_gap_pct']:6.2f}%")
-        elif row["metric"] in ("raw_nontrivial_feasible_rate", "repaired_optimality_gap_pct"):
-            print(f"    {row['treatment']} - {row['baseline']} {row['metric']}: "
-                  f"{row['mean_paired_difference']:+.4f} "
-                  f"[{row['bootstrap_95_ci_low']:+.4f}, {row['bootstrap_95_ci_high']:+.4f}]")
+            print(
+                f"{row['sampler']:3s} {row['treatment']:26s} feas={row['raw_feasible_rate']:.3f} "
+                f"nontrivial={row['raw_nontrivial_feasible_rate']:.3f} "
+                f"gap={row['repaired_optimality_gap_pct']:6.2f}%"
+            )
+        elif row["metric"] in (
+            "raw_nontrivial_feasible_rate",
+            "repaired_optimality_gap_pct",
+        ):
+            print(
+                f"    {row['treatment']} - {row['baseline']} {row['metric']}: "
+                f"{row['mean_paired_difference']:+.4f} "
+                f"[{row['bootstrap_95_ci_low']:+.4f}, {row['bootstrap_95_ci_high']:+.4f}]"
+            )
     if any(math.isnan(float(r["repaired_optimality_gap_pct"])) for r in rows):
         print("warning: some repaired gaps are NaN")
 

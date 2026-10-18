@@ -23,7 +23,6 @@ chain-break fraction across problem sizes, and ``chain_strength_sweep``
 justifies the strength choice.
 """
 
-import math
 import random
 import time
 from typing import Callable, Dict, List, Optional, Tuple

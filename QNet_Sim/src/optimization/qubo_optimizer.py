@@ -11,7 +11,7 @@ class QUBOOptimizer:
         "memory_demands",
         "utility"
     }
-#Success prob./latency/b-pair cost/fidelity are used for utility. 
+#Success prob./latency/b-pair cost/fidelity are used for utility.
 #Pruning is done with utility, fidelity, and b-pair cost
 #Purification is used to calculate fidelity, prob., latency, and resource demand
 #The only things really needed for optimization are the bundle_id, request_id, path, edge_demands, memory_demands, and utility. The rest are used to calculate these values
@@ -36,10 +36,10 @@ class QUBOOptimizer:
             if missing:
                 bundle_id = bundle.get("bundle_id", "unknown")
                 raise ValueError(f"Bundle {bundle_id} is missing: {missing}")
-            
+
     def _bundle_key(self, bundle):
         return (bundle["request_id"], bundle["bundle_id"])
-    
+
     def _undirected_edge(self,edge):
         return tuple(sorted(edge))
 
@@ -91,14 +91,14 @@ class QUBOOptimizer:
                     f"Memory capacity for node {node} must be a nonnegative integer"
                 )
         return memory_capacities
-    
+
     def _group_bundles(self):
         groups = {}
         for bundle in self.bundles:
             groups.setdefault(bundle["request_id"], []).append(bundle)
         return groups
 #For H_{one bundle per request}
-    
+
     def _binary_variables(self):
         variables = {}
         for index,bundle in enumerate(self.bundles):
@@ -109,7 +109,7 @@ class QUBOOptimizer:
                 )
             variables[key] = Binary(f"x_{index}")
         return variables
-    
+
     def _create_variable_map(self):
         variable_map = {}
         for index, bundle in enumerate(self.bundles):
@@ -129,7 +129,7 @@ class QUBOOptimizer:
                     raise ValueError(f"Missing edge capacity for edge {edge}")
                 edge_demands.setdefault(edge, []).append((key,demand))
         return edge_demands
-    
+
     def _group_memory_demands(self):
         memory_demands = {}
         for bundle in self.bundles:
@@ -226,7 +226,7 @@ class QUBOOptimizer:
         if isinstance(hamiltonian, (int, float)):
             return Num(hamiltonian)
         return hamiltonian
-    
+
     def repair_selection(self, selected):
         """Deterministic greedy feasibility repair for a decoded sample.
 

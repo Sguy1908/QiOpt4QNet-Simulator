@@ -364,7 +364,7 @@ def main():
                 for key,group in sorted(groups.items())
             ],
         )
-    
+
     for row in summary:
         print(
             f"{row['difference_definition']:42s} "

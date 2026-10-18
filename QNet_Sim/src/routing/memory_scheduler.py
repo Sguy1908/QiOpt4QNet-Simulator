@@ -22,7 +22,7 @@ This module provides the two building blocks used by the joint router:
 per-node occupation intervals a router must reserve.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import math
 import random
 from typing import Dict, List, Optional, Tuple

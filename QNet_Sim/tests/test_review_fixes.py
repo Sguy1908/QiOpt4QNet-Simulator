@@ -82,8 +82,12 @@ def test_solution_energy_defaults_score_the_sampled_hamiltonian():
     # minimise over slack bits for this assignment of the bundle variables
     slack = [v for v in bqm.variables if v not in opt.variable_map]
     best = min(
-        bqm.energy({**{v: int(v in chosen) for v in opt.variable_map},
-                    **dict(zip(slack, bits))})
+        bqm.energy(
+            {
+                **{v: int(v in chosen) for v in opt.variable_map},
+                **dict(zip(slack, bits)),
+            }
+        )
         for bits in itertools.product((0, 1), repeat=len(slack))
     )
     assert opt.solution_energy(selection) == pytest.approx(best)
@@ -98,13 +102,26 @@ def _random_instance(rng):
     bundles = []
     for r in range(rng.randint(2, 3)):
         for k in range(rng.randint(1, 3)):
-            bundles.append(_bundle(
-                f"b{k}", f"r{r}", round(rng.uniform(-0.5, 3.0), 3),
-                {e: rng.randint(1, 3) for e in rng.sample(edges, rng.randint(1, 2))},
-                {v: rng.randint(1, 2) for v in rng.sample(nodes, rng.randint(1, 2))},
-            ))
-    return (bundles, {e: rng.randint(1, 4) for e in edges},
-            {v: rng.randint(1, 3) for v in nodes})
+            bundles.append(
+                _bundle(
+                    f"b{k}",
+                    f"r{r}",
+                    round(rng.uniform(-0.5, 3.0), 3),
+                    {
+                        e: rng.randint(1, 3)
+                        for e in rng.sample(edges, rng.randint(1, 2))
+                    },
+                    {
+                        v: rng.randint(1, 2)
+                        for v in rng.sample(nodes, rng.randint(1, 2))
+                    },
+                )
+            )
+    return (
+        bundles,
+        {e: rng.randint(1, 4) for e in edges},
+        {v: rng.randint(1, 3) for v in nodes},
+    )
 
 
 def _best_feasible_utility(bundles, ecap, mcap):
@@ -122,7 +139,9 @@ def _best_feasible_utility(bundles, ecap, mcap):
                 load_e[e] = load_e.get(e, 0) + d
             for v, d in b["memory_demands"].items():
                 load_m[v] = load_m.get(v, 0) + d
-        if all(load_e[e] <= ecap[e] for e in load_e) and all(load_m[v] <= mcap[v] for v in load_m):
+        if all(load_e[e] <= ecap[e] for e in load_e) and all(
+            load_m[v] <= mcap[v] for v in load_m
+        ):
             best = max(best, utility)
     return best
 
@@ -147,8 +166,11 @@ def test_new_calibration_rules_keep_feasible_optimal_ground_state(strategy, pair
         for sample in ground.samples():
             selected = opt.decode_sample(sample)
             assert len({r for r, _ in selected}) == len(selected)
-            utility = sum(b["utility"] for b in bundles
-                          if (b["request_id"], b["bundle_id"]) in selected)
+            utility = sum(
+                b["utility"]
+                for b in bundles
+                if (b["request_id"], b["bundle_id"]) in selected
+            )
             assert utility == pytest.approx(target)
 
 
@@ -183,8 +205,13 @@ def test_nontrivial_feasibility_excludes_the_empty_selection():
     empty = {name: 0 for name in opt.variable_map}
     useful = dict(empty)
     useful[next(n for n, k in opt.variable_map.items() if k == ("r1", "b1"))] = 1
-    stats = summarize_response(opt, _Response([empty, useful]), opt.bundles,
-                               opt.edge_capacities, opt.memory_capacities)
+    stats = summarize_response(
+        opt,
+        _Response([empty, useful]),
+        opt.bundles,
+        opt.edge_capacities,
+        opt.memory_capacities,
+    )
     assert stats["raw_feasible_rate"] == 1.0
     assert stats["raw_nontrivial_feasible_rate"] == 0.5
 
