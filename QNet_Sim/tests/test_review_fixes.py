@@ -240,6 +240,7 @@ def _sampler_check_rows():
                 "n_requests": n_requests,
                 "arm": arm,
                 "sampler": sampler,
+                "solver_seed": 101,
                 "raw_feasible_rate": rng.random(),
                 "raw_nontrivial_feasible_rate": rng.random(),
                 "repaired_optimality_gap_pct": 10 * rng.random(),
@@ -254,3 +255,29 @@ def test_sampler_check_summary_is_the_same_from_csv_strings():
     rows = _sampler_check_rows()
     as_csv = [{k: str(v) for k, v in row.items()} for row in rows]
     assert summarize(as_csv, n_boot=50) == summarize(rows, n_boot=50)
+
+
+def test_sampler_check_averages_solver_seeds_within_instance():
+    rows = _sampler_check_rows()
+    shifted = []
+    for row in rows:
+        for solver_seed, delta in ((101, -1.0), (202, 1.0)):
+            shifted.append(
+                {
+                    **row,
+                    "solver_seed": solver_seed,
+                    "repaired_optimality_gap_pct": row["repaired_optimality_gap_pct"]
+                    + delta,
+                }
+            )
+    pairs = zip(summarize(shifted, n_boot=50), summarize(rows, n_boot=50))
+    for averaged, single in pairs:
+        for key, value in single.items():
+            assert averaged[key] == pytest.approx(value), key
+
+
+def test_sampler_check_rejects_arms_with_different_solver_seeds():
+    rows = _sampler_check_rows()
+    rows[0]["solver_seed"] = 202
+    with pytest.raises(ValueError, match="different solver seeds"):
+        summarize(rows, n_boot=50)

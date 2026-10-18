@@ -37,6 +37,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import itertools
 import math
 import multiprocessing
 import os
@@ -80,7 +81,7 @@ ARMS = {
 SAMPLERS = ("sa", "sqa")
 READS = 100
 SA_SWEEPS = 1000
-SOLVER_SEED = 101
+SOLVER_SEEDS = (101,)
 # (treatment, baseline)
 CONTRASTS = [
     ("resource_aware_per", "conventional"),
@@ -110,7 +111,7 @@ def sample(sampler, bqm, seed):
     return draw_reads("sqa", bqm, READS, seed, independent=True)
 
 
-def run_instances(topologies, triples, log=print):
+def run_instances(topologies, triples, solver_seeds=SOLVER_SEEDS, log=print):
     rows = []
     for index, (topology, instance_seed, n_requests) in enumerate(triples, start=1):
         inst = contention_sweep_instances(
@@ -132,10 +133,10 @@ def run_instances(topologies, triples, log=print):
             bqm, _ = build_calibrated_bqm(
                 optimizer, strategy, pairwise_request_penalty=pairwise
             )
-            for sampler in SAMPLERS:
+            for sampler, solver_seed in itertools.product(SAMPLERS, solver_seeds):
                 stats = summarize_response(
                     optimizer,
-                    sample(sampler, bqm, SOLVER_SEED),
+                    sample(sampler, bqm, solver_seed),
                     bundles,
                     edge_caps,
                     mem_caps,
@@ -147,7 +148,7 @@ def run_instances(topologies, triples, log=print):
                         "n_requests": n_requests,
                         "arm": arm,
                         "sampler": sampler,
-                        "solver_seed": SOLVER_SEED,
+                        "solver_seed": solver_seed,
                         "reads": READS,
                         "sa_sweeps": SA_SWEEPS if sampler == "sa" else "",
                         "bqm_variables": bqm.num_variables,
@@ -164,9 +165,12 @@ def run_instances(topologies, triples, log=print):
     return rows
 
 
-def _run_shard(triples):
+def _run_shard(job):
+    triples, solver_seeds = job
     topologies = dict(_topology_cases(True))
-    return run_instances(topologies, triples, log=lambda m: print(m, flush=True))
+    return run_instances(
+        topologies, triples, solver_seeds, log=lambda m: print(m, flush=True)
+    )
 
 
 def _contrast_seed(*parts):
@@ -174,8 +178,12 @@ def _contrast_seed(*parts):
 
 
 def summarize(rows, n_boot=10000):
-    """Absolute levels per arm and paired contrasts with seed-block bootstrap CIs."""
-    by_key = defaultdict(dict)
+    """Absolute levels per arm and paired contrasts with seed-block bootstrap CIs.
+
+    Solver seeds are averaged within each instance, sampler and arm first, so
+    the instance stays the statistical unit.
+    """
+    by_seed = defaultdict(lambda: defaultdict(list))
     for row in rows:
         key = (
             row["topology"],
@@ -183,10 +191,24 @@ def summarize(rows, n_boot=10000):
             int(row["n_requests"]),
             row["sampler"],
         )
-        by_key[key][row["arm"]] = row
-    for key, arms in by_key.items():
+        by_seed[key][row["arm"]].append(row)
+    by_key = {}
+    for key, arms in by_seed.items():
         if set(arms) != set(ARMS):
             raise ValueError(f"incomplete arms for {key}")
+        seeds = {
+            arm: sorted(int(r["solver_seed"]) for r in runs)
+            for arm, runs in arms.items()
+        }
+        if len({tuple(v) for v in seeds.values()}) != 1:
+            raise ValueError(f"arms of {key} have different solver seeds: {seeds}")
+        by_key[key] = {
+            arm: {
+                metric: statistics.fmean(float(r[metric]) for r in runs)
+                for metric, _ in METRICS
+            }
+            for arm, runs in arms.items()
+        }
 
     out = []
     for sampler in SAMPLERS:
@@ -260,6 +282,9 @@ def main(argv=None):
         ),
     )
     parser.add_argument(
+        "--solver-seeds", type=int, nargs="+", default=list(SOLVER_SEEDS)
+    )
+    parser.add_argument(
         "--from-runs",
         action="store_true",
         help="re-summarize <out-dir>/sampler_check_runs.csv instead of solving",
@@ -311,13 +336,15 @@ def _solve(args):
         None if args.full else args.n_instances,
     )
     if args.workers > 1:
-        shards = [triples[i :: args.workers] for i in range(args.workers)]
+        shards = [
+            (triples[i :: args.workers], args.solver_seeds) for i in range(args.workers)
+        ]
         with multiprocessing.get_context("spawn").Pool(args.workers) as pool:
             rows = [
                 r for shard in pool.map(_run_shard, shards, chunksize=1) for r in shard
             ]
     else:
-        rows = run_instances(dict(_topology_cases(True)), triples)
+        rows = run_instances(dict(_topology_cases(True)), triples, args.solver_seeds)
     rows.sort(
         key=lambda r: (
             r["topology"],
@@ -325,6 +352,7 @@ def _solve(args):
             r["n_requests"],
             r["arm"],
             r["sampler"],
+            r["solver_seed"],
         )
     )
     return rows
