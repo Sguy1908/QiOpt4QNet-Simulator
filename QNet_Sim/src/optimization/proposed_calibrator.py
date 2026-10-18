@@ -221,3 +221,87 @@ def proposed_resource_coefficients(
         "D": {n: safety_factor * v + epsilon for n, v in memory_bounds.items()},
         "E": float(memory_congestion_penalty),
     }
+
+
+def local_utility_coefficients(
+    optimizer,
+    *,
+    safety_factor: float = 1.0,
+    congestion_penalty: float = 0.0,
+    memory_congestion_penalty: float = 0.0,
+) -> Dict[str, object]:
+    """Per-resource coefficients without the reachable-load bound.
+
+    Each edge and memory gets ``max u_b^+`` over the bundles that use it, plus
+    epsilon. This is sufficient for the same reason the conventional rule is:
+    with integer demands, removing a bundle that contributes to an overload
+    lowers that resource's squared overload by at least one unit. It is the
+    ablation that separates coefficient *scope* (local vs. global) from the
+    reachable-load dynamic program of ``proposed_resource_coefficients``.
+    """
+    if safety_factor <= 0:
+        raise ValueError("safety_factor must be positive")
+
+    utilities = {
+        optimizer._bundle_key(bundle): max(0.0, float(bundle["utility"]))
+        for bundle in optimizer.bundles
+    }
+    p0 = positive_utility_scale(optimizer)
+    epsilon = penalty_epsilon(p0)
+
+    def local(grouped):
+        return {
+            resource: safety_factor * max(
+                (utilities.get(key, 0.0) for key, _ in uses), default=0.0
+            ) + epsilon
+            for resource, uses in grouped.items()
+        }
+
+    return {
+        "A": safety_factor * p0 + epsilon,
+        "B": local(optimizer.edge_demands),
+        "C": float(congestion_penalty),
+        "D": local(optimizer.memory_demands),
+        "E": float(memory_congestion_penalty),
+    }
+
+
+def pairwise_request_penalties(
+    optimizer, *, safety_factor: float = 1.0
+) -> Dict[Tuple[BundleKey, BundleKey], float]:
+    """One request-conflict coefficient per pair of bundles of one request.
+
+    ``A_bc = min(u_b^+, u_c^+) + epsilon`` keeps the ground-state guarantee:
+    in a state that selects several bundles of one request, dropping the
+    lowest-utility one, c, loses at most ``u_c^+`` but removes at least one
+    pair term ``A_bc > u_c^+`` and cannot raise any capacity penalty.
+    """
+    if safety_factor <= 0:
+        raise ValueError("safety_factor must be positive")
+    utilities = {
+        optimizer._bundle_key(bundle): max(0.0, float(bundle["utility"]))
+        for bundle in optimizer.bundles
+    }
+    epsilon = penalty_epsilon(positive_utility_scale(optimizer))
+    penalties: Dict[Tuple[BundleKey, BundleKey], float] = {}
+    for bundles in optimizer.bundles_by_request.values():
+        keys = [optimizer._bundle_key(bundle) for bundle in bundles]
+        for i, first in enumerate(keys):
+            for second in keys[i + 1:]:
+                penalties[(first, second)] = (
+                    safety_factor * min(utilities[first], utilities[second]) + epsilon
+                )
+    return penalties
+
+
+def apply_pairwise_request_penalties(optimizer, bqm, uniform_A, pair_penalties):
+    """Replace the uniform request-conflict coefficient on each pair in ``bqm``.
+
+    ``bqm`` must have been built by ``optimizer.to_bqm`` with
+    ``penalty=uniform_A``; each conflict interaction is shifted from
+    ``uniform_A`` to its own value. The BQM is modified in place and returned.
+    """
+    variable_of = {key: name for name, key in optimizer.variable_map.items()}
+    for (first, second), value in pair_penalties.items():
+        bqm.add_interaction(variable_of[first], variable_of[second], value - uniform_A)
+    return bqm

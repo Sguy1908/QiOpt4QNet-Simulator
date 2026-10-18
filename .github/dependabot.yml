@@ -1,0 +1,8 @@
+version: 2
+updates:
+  # Python dependencies are pinned for reproducibility of the published
+  # results and are updated by hand; only the CI actions are kept current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

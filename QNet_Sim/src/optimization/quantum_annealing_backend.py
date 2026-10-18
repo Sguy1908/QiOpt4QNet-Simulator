@@ -23,7 +23,6 @@ chain-break fraction across problem sizes, and ``chain_strength_sweep``
 justifies the strength choice.
 """
 
-import math
 import random
 import time
 from typing import Callable, Dict, List, Optional, Tuple
@@ -429,7 +428,7 @@ def run_quantum_annealing_sweep(topology_fn: Callable,
         selector = AdaptiveCandidateSelector(ec, mc, seed=seed)
         reduced = selector.select(bundles, k=k)
         opt = QUBOOptimizer(reduced, ec, mc)
-        bqm = opt.to_bqm()
+        bqm = opt.to_bqm(congestion_penalty=0.05, memory_congestion_penalty=0.05)
         t0 = time.perf_counter()
         sqa_resp = solve_sqa(bqm, num_reads=num_reads, seed=seed)
         sqa_sel = opt.decode_sample(sqa_resp.first.sample, repair=True)

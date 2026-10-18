@@ -11,7 +11,7 @@ class QUBOOptimizer:
         "memory_demands",
         "utility"
     }
-#Success prob./latency/b-pair cost/fidelity are used for utility. 
+#Success prob./latency/b-pair cost/fidelity are used for utility.
 #Pruning is done with utility, fidelity, and b-pair cost
 #Purification is used to calculate fidelity, prob., latency, and resource demand
 #The only things really needed for optimization are the bundle_id, request_id, path, edge_demands, memory_demands, and utility. The rest are used to calculate these values
@@ -36,10 +36,10 @@ class QUBOOptimizer:
             if missing:
                 bundle_id = bundle.get("bundle_id", "unknown")
                 raise ValueError(f"Bundle {bundle_id} is missing: {missing}")
-            
+
     def _bundle_key(self, bundle):
         return (bundle["request_id"], bundle["bundle_id"])
-    
+
     def _undirected_edge(self,edge):
         return tuple(sorted(edge))
 
@@ -91,14 +91,14 @@ class QUBOOptimizer:
                     f"Memory capacity for node {node} must be a nonnegative integer"
                 )
         return memory_capacities
-    
+
     def _group_bundles(self):
         groups = {}
         for bundle in self.bundles:
             groups.setdefault(bundle["request_id"], []).append(bundle)
         return groups
 #For H_{one bundle per request}
-    
+
     def _binary_variables(self):
         variables = {}
         for index,bundle in enumerate(self.bundles):
@@ -109,7 +109,7 @@ class QUBOOptimizer:
                 )
             variables[key] = Binary(f"x_{index}")
         return variables
-    
+
     def _create_variable_map(self):
         variable_map = {}
         for index, bundle in enumerate(self.bundles):
@@ -129,7 +129,7 @@ class QUBOOptimizer:
                     raise ValueError(f"Missing edge capacity for edge {edge}")
                 edge_demands.setdefault(edge, []).append((key,demand))
         return edge_demands
-    
+
     def _group_memory_demands(self):
         memory_demands = {}
         for bundle in self.bundles:
@@ -226,12 +226,6 @@ class QUBOOptimizer:
         if isinstance(hamiltonian, (int, float)):
             return Num(hamiltonian)
         return hamiltonian
-    
-    def _demands_of(self, request_id, bundle_id):
-        for bundle in self.bundles:
-            if bundle["request_id"] == request_id and bundle["bundle_id"] == bundle_id:
-                return bundle["edge_demands"], bundle["memory_demands"]
-        return None
 
     def repair_selection(self, selected):
         """Deterministic greedy feasibility repair for a decoded sample.
@@ -245,26 +239,32 @@ class QUBOOptimizer:
         at-most-one per request, so leaving the request unserved (zero
         contribution) strictly dominates provisioning a non-positive-utility
         bundle and only frees capacity for other requests.
+
+        If a sample selects several bundles for one request, the
+        highest-utility one is kept (ties broken by bundle id), so the result
+        does not depend on the order of ``selected``. This matches
+        ``experiments.run_penalty_calibration.deterministic_repair``.
         """
-        selected_map = dict(selected)
+        by_key = {self._bundle_key(bundle): bundle for bundle in self.bundles}
         order = {}
-        for bundle in self.bundles:
-            key = self._bundle_key(bundle)
-            if key[0] in selected_map and selected_map[key[0]] == key[1]:
-                order[key[0]] = (bundle["utility"], key[0], key[1])
+        for key in selected:
+            bundle = by_key.get(key)
+            if bundle is None:
+                continue
+            rank = (bundle["utility"], key[0], key[1])
+            if key[0] not in order or rank > order[key[0]]:
+                order[key[0]] = rank
         ordered_requests = sorted(order, key=lambda rid: order[rid], reverse=True)
 
         edge_load = defaultdict(int)
         mem_load = defaultdict(int)
         repaired = []
         for rid in ordered_requests:
-            utility, bid = order[rid][0], selected_map[rid]
+            utility, _, bid = order[rid]
             if utility <= 0.0:
                 continue
-            demands = self._demands_of(rid, bid)
-            if demands is None:
-                continue
-            edge_demands, mem_demands = demands
+            bundle = by_key[(rid, bid)]
+            edge_demands, mem_demands = bundle["edge_demands"], bundle["memory_demands"]
             feasible = True
             for edge, d in edge_demands.items():
                 e = self._undirected_edge(edge)
@@ -293,9 +293,13 @@ class QUBOOptimizer:
             selected = self.repair_selection(selected)
         return selected
 
-    def solution_energy(self, selected, edge_penalty=10.0, memory_penalty=10.0,
-                        congestion_penalty=0.05, memory_congestion_penalty=0.05):
+    def solution_energy(self, selected, edge_penalty=None, memory_penalty=None,
+                        congestion_penalty=0.0, memory_congestion_penalty=0.0):
         """Exact Hamiltonian energy of a decoded selection, matching the QUBO.
+
+        Defaults match ``to_qubo``/``to_bqm``: omitted edge/memory penalties
+        fall back to the utility scale and soft congestion is off, so calling
+        both with the same arguments scores the Hamiltonian that was sampled.
 
         For a capacity-feasible selection the request-conflict penalty (A) is
         identically zero, so only utility, overload, and congestion terms
@@ -304,6 +308,11 @@ class QUBOOptimizer:
         ``edge_penalty`` and ``memory_penalty`` accept either a scalar or a
         per-resource mapping, matching the calibration strategies.
         """
+        _, edge_default, memory_default = self._utility_scale_penalties()
+        if edge_penalty is None:
+            edge_penalty = edge_default
+        if memory_penalty is None:
+            memory_penalty = memory_default
         # Match _feed: accept edges in either orientation.
         edge_penalty = self._normalize_edge_penalty(edge_penalty)
         selected_map = dict(selected)
@@ -391,14 +400,16 @@ class QUBOOptimizer:
             memory_penalty, self.memory_index, "D_", "memory_penalty"))
         return feed
 
+    # Soft congestion (C, E) defaults to off: it penalises feasible loads, so
+    # with C or E > 0 the ground state need not be the constrained optimum.
     def to_qubo(self, penalty=None, edge_penalty=None, memory_penalty=None,
-                congestion_penalty=0.05, memory_congestion_penalty=0.05):
+                congestion_penalty=0.0, memory_congestion_penalty=0.0):
         penalty, edge_penalty, memory_penalty = self._resolve_penalties(
             penalty, edge_penalty, memory_penalty)
         return self.model.to_qubo(feed_dict=self._feed(penalty, edge_penalty, memory_penalty, congestion_penalty, memory_congestion_penalty))
 
     def to_bqm(self, penalty=None, edge_penalty=None, memory_penalty=None,
-               congestion_penalty=0.05, memory_congestion_penalty=0.05):
+               congestion_penalty=0.0, memory_congestion_penalty=0.0):
         penalty, edge_penalty, memory_penalty = self._resolve_penalties(
             penalty, edge_penalty, memory_penalty)
         return self.model.to_bqm(feed_dict=self._feed(penalty, edge_penalty, memory_penalty, congestion_penalty, memory_congestion_penalty))

@@ -7,7 +7,8 @@
 4. Path validity across all selected bundles
 5. Metropolis vs MPS consistency on small instances
 """
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
 from collections import defaultdict
@@ -147,7 +148,7 @@ def main():
             result = opt.solve(**kwargs)
         elif solver_name.startswith("QUBO"):
             opt = QUBOOptimizer(all_bundles, ec, mc)
-            bqm = opt.to_bqm()
+            bqm = opt.to_bqm(congestion_penalty=0.05, memory_congestion_penalty=0.05)
             if kwargs["solve_sa"]:
                 response = solve_sa(bqm, num_reads=20, seed=1)
             else:
@@ -184,7 +185,7 @@ def main():
             result = opt.solve(**kwargs)
         elif solver_name.startswith("QUBO"):
             opt = QUBOOptimizer(all_bundles, ec, mc)
-            bqm = opt.to_bqm()
+            bqm = opt.to_bqm(congestion_penalty=0.05, memory_congestion_penalty=0.05)
             if kwargs["solve_sa"]:
                 response = solve_sa(bqm, num_reads=20, seed=1)
             else:

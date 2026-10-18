@@ -610,8 +610,10 @@ def test_qubo_solution_energy_matches_hamiltonian():
     mem_caps = {"M": 100}
 
     opt = QUBOOptimizer(bundles, edge_caps, mem_caps)
-    en = opt.solution_energy([("r1", "b0")])
+    en = opt.solution_energy([("r1", "b0")], congestion_penalty=0.05,
+                             memory_congestion_penalty=0.05)
     assert abs(en - (-60.0 + 0.05 * 9 + 0.05 * 1)) < 1e-9
+    assert opt.solution_energy([("r1", "b0")]) == -60.0
     en_both = opt.solution_energy([("r1", "b0"), ("r2", "b0")])
     assert en_both > en
 

@@ -1,0 +1,23 @@
+name: paper
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "paper/**"
+      - "QNet_Sim/**/*.py"
+      - ".github/scripts/check_paper.py"
+      - ".github/workflows/paper.yml"
+
+jobs:
+  consistency:
+    # The class file and figures live in the manuscript package, not here, so
+    # this checks citations, cross-references and named scripts statically.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python .github/scripts/check_paper.py
