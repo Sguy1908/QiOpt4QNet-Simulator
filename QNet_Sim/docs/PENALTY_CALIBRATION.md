@@ -158,6 +158,102 @@ Do not quote a small-sample magnitude as the effect size: the PR #20 discussion
 reports about `-16` pp for the repaired-gap effect on a 40-instance subsample,
 against `-10.8` pp on the full cohort.
 
+**The OpenJij SA schedule is weak.** Even with independent reads the absolute
+gaps in this check stay large. The mean repaired gap under conventional and
+per-resource calibration is `61.4%` / `48.3%` at 10 reads, `42.6%` / `29.5%` at
+100 reads and `59.7%` / `43.9%` at 10 reads with 10,000 sweeps. The next
+section repeats the study with a sampler that gets close to the reference.
+
+## Sampler-configuration check and scope ablations
+
+`run_penalty_calibration_sampler_check.py` re-solves every selected instance
+with samplers that explore:
+
+- `sa`: dwave-samplers `SimulatedAnnealingSampler`, 1000 sweeps, default beta
+  range, 100 reads in one call (independent within the call);
+- `sqa`: OpenJij SQA with the held-out settings, each of the 100 reads drawn as
+  its own seeded call (`draw_reads(..., independent=True)`).
+
+It uses one solver seed (`101`) and five arms. The two new ones are ablations,
+and both keep the ground-state guarantee for `C = E = 0`:
+
+- `local_utility`: one coefficient per resource, `B_e = max u_b^+` over the
+  bundles that use `e` (plus epsilon), with no reachable-load bound. This
+  separates coefficient scope from the dynamic program.
+- `resource_aware_per_pairA`: the per-resource B/D plus per-pair request
+  penalties `A_bc = min(u_b^+, u_c^+) + eps`.
+
+```bash
+# about 1.5 h on 8 idle cores; 3 h on a shared machine
+PYTHONPATH=src python3 src/experiments/run_penalty_calibration_sampler_check.py --full --workers 8
+
+# rebuild the level and contrast files from an existing sampler_check_runs.csv
+PYTHONPATH=src python3 src/experiments/run_penalty_calibration_sampler_check.py --from-runs
+```
+
+Outputs: `sampler_check_runs.csv` (10,780 rows), `sampler_check_levels.csv` and
+`sampler_check_summary.csv` (6 contrasts x 2 samplers x 5 metrics, with
+generation-seed-block bootstrap intervals over 90 blocks).
+
+**Full-cohort result (1,078 instances).** Mean levels:
+
+| sampler | arm | raw feasible | repaired gap | raw overload |
+| --- | --- | --- | --- | --- |
+| SA | conventional | `38.0%` | `6.21%` | `0.081` |
+| SA | global | `38.9%` | `6.10%` | `0.081` |
+| SA | per-resource | `46.7%` | `5.20%` | `0.111` |
+| SA | local-utility | `41.6%` | `5.26%` | `0.108` |
+| SA | per-resource + per-pair A | `20.5%` | `4.48%` | `0.183` |
+| SQA | conventional | `22.6%` | `5.01%` | `2.257` |
+| SQA | global | `23.6%` | `4.93%` | `2.238` |
+| SQA | per-resource | `30.6%` | `3.14%` | `1.608` |
+| SQA | local-utility | `25.8%` | `3.79%` | `1.788` |
+| SQA | per-resource + per-pair A | `9.9%` | `2.18%` | `2.091` |
+
+Paired contrasts (pp; 95% bootstrap intervals):
+
+| contrast | sampler | raw feasible | repaired gap |
+| --- | --- | --- | --- |
+| per-resource - conventional | SA | `+8.67` `[+7.85, +9.51]` | `-1.01` `[-1.36, -0.68]` |
+| per-resource - conventional | SQA | `+7.99` `[+7.15, +8.87]` | `-1.87` `[-2.13, -1.63]` |
+| per-resource - global | SA | `+7.82` `[+7.13, +8.53]` | `-0.90` `[-1.22, -0.58]` |
+| per-resource - global | SQA | `+7.02` `[+6.29, +7.76]` | `-1.79` `[-2.04, -1.55]` |
+| global - conventional | SA | `+0.85` `[+0.47, +1.25]` | `-0.11` `[-0.24, -0.002]` |
+| global - conventional | SQA | `+0.97` `[+0.56, +1.44]` | `-0.09` `[-0.20, +0.02]` |
+| local-utility - conventional | SA | `+3.55` `[+3.00, +4.12]` | `-0.94` `[-1.28, -0.62]` |
+| local-utility - conventional | SQA | `+3.20` `[+2.68, +3.75]` | `-1.23` `[-1.48, -0.99]` |
+| per-resource - local-utility | SA | `+5.11` `[+4.48, +5.75]` | `-0.07` `[-0.30, +0.16]` |
+| per-resource - local-utility | SQA | `+4.79` `[+4.12, +5.46]` | `-0.64` `[-0.83, -0.45]` |
+| per-pair A - per-resource | SA | `-26.17` `[-27.27, -25.07]` | `-0.72` `[-0.95, -0.48]` |
+| per-pair A - per-resource | SQA | `-20.74` `[-21.88, -19.66]` | `-0.96` `[-1.14, -0.77]` |
+
+What this changes:
+
+- **The feasibility gain is robust and the quality gain is not.** Per-resource
+  minus conventional raw feasibility is `+8.7` / `+8.0` pp here, against
+  `+12.0` / `+7.6` pp in the fixed-seed study and `+10.5` pp in the
+  independent-read OpenJij SA check. The repaired-gap gain falls from
+  `-10.8` / `-6.8` pp to `-1.0` / `-1.9` pp, because with 100 distinct samples
+  the best repaired read is already within about 5-6% of the reference under
+  conventional calibration.
+- **Scope alone is not enough.** The local-utility rule gets about two-fifths
+  of the per-resource feasibility gain, and the reachable-load bound adds the
+  rest (`+5.1` / `+4.8` pp). For SA repaired gap the two are equivalent; for
+  SQA the bound adds `-0.64` pp. The earlier conclusion that "scope accounts
+  for nearly all of the gain" came from comparing against the global rule
+  only, which applies the bound and then takes a family-wide maximum.
+- **Per-pair request penalties trade raw feasibility for repaired quality.**
+  Conflicts per read rise by about one, raw feasibility falls by 21-26 pp,
+  and the repaired gap still improves by 0.7-1.0 pp.
+- **Overload flips.** Per-resource calibration raises SA overload slightly
+  (`+0.031`) and lowers SQA overload (`-0.65`), the reverse of the fixed-seed
+  study.
+- The non-trivial feasible rate is within 0.8 pp of the raw feasible rate for
+  every arm, so the gains do not come from empty allocations.
+
+Limits: one solver seed, and the local-utility ablation drops the reachable-load
+bound and redundant-constraint detection together.
+
 ## Metrics that matter
 
 Do not judge calibration only after feasibility repair. Repair can hide poor
@@ -455,9 +551,12 @@ Use:
 
 The defensible claim is that resource-aware calibration gives a provably
 no-larger sufficient resource-penalty calibration while preserving the same
-exact ground-state guarantee, and that scoping it per resource additionally
-improves SA and SQA raw feasibility and repaired optimality gap relative to the
-global rule under fixed solver settings.
+exact ground-state guarantee, and that scoping it per resource raises SA and
+SQA raw feasibility by 7.6-13.2 pp across every sampler protocol tested.
+The repaired-gap gain is large (7-11 pp) only for the weak fixed-seed OpenJij
+samplers; with well-configured samplers it is 1-2 pp. The gain needs both the
+per-resource scope and the reachable-load bound (see the sampler-configuration
+check above).
 
 Report both the frequency and magnitude of tightening and the measured
 saturation mechanism, and state explicitly that the per-resource rule does not

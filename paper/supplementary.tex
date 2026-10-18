@@ -16,7 +16,7 @@
 \maketitle
 
 \section{Scope and provenance of the evidence}
-This document covers the experiments behind the main text: the penalty-calibration study, the solver benchmark, the hardness sweep, the Boundary-TN and true-MPS ablations, the stochastic reliability study, the physics-validation audit and the randomized ground-state audit. Two exploratory runs are excluded from all quantitative claims because they were incomplete: a topology-generalization run produced 10 of 250 expected rows, and an extension following Rosales produced 4 of 24. Neither appears as evidence in the main text.
+This document covers the experiments behind the main text: the penalty-calibration study, the solver benchmark, the hardness sweep, the Boundary-TN and true-MPS ablations, the stochastic reliability study, the physics-validation audit, the randomized ground-state audit and a sampler-configuration check of the calibration with two ablations. Two exploratory runs are excluded from all quantitative claims because they were incomplete: a topology-generalization run produced 10 of 250 expected rows, and an extension following Rosales produced 4 of 24. Neither appears as evidence in the main text.
 
 The calibration study generated 1,080 instances (four topology--capacity configurations, 90 generation seeds, request counts 8, 16 and 24) with no empty instance. Instances were selected for the solver study when the global or the per-resource family-mean coefficient ratio to the conventional coefficient fell below $0.999999$, which yielded 1,078 instances, 32,340 solver rows, 6,468 instance--sampler--calibration aggregate cells, 90 generation-seed blocks and five solver seeds per instance ($101,202,303,404,505$). Solver seeds are treated as repeated measurements and averaged within each instance before inference. Every calibration number in the manuscript is regenerated from the repository (see \texttt{QNet\_Sim/results/README.md}); the four topology--capacity configurations are a chain with 8 nodes and edge capacity 4, a $3\times3$ grid with capacity 4, a chain with 10 nodes and capacity 6 and a $4\times4$ grid with capacity 5.
 
@@ -164,7 +164,7 @@ With a fixed random seed, the OpenJij simulated-annealing and simulated-quantum-
 
 Drawing each read as its own seeded call (seeds $s,s+1,\ldots$) makes extra reads independent but is expensive: a single-read call takes about 17 ms on a 65-variable instance and about 230 ms on a 209-variable instance, so 1,000 independent reads take roughly 17 s and 230 s, respectively.
 
-Table~\ref{tab:budget} reports the per-resource versus conventional effect for SA with independent reads on all 1,078 evaluated instances (two solver seeds, averaged within instance). A tenfold increase in reads leaves the effect unchanged and a tenfold increase in sweeps enlarges it, so the benefit does not come from an under-resourced annealer. SQA was not included in this check.
+Table~\ref{tab:budget} reports the per-resource versus conventional effect for SA with independent reads on all 1,078 evaluated instances (two solver seeds, averaged within instance). A tenfold increase in reads leaves the effect unchanged and a tenfold increase in sweeps enlarges it, so within this SA schedule the benefit does not come from too small a budget. SQA was not included in this check. The absolute gaps stay large: the mean repaired gap under conventional and per-resource calibration is 61.4\% and 48.3\% at 10 reads, 42.6\% and 29.5\% at 100 reads, and 59.7\% and 43.9\% at 10 reads with 10,000 sweeps. Section~\ref{sec:samplercheck} repeats the comparison with a better-configured SA.
 
 \begin{table}[h]
 \caption{Solver-budget sensitivity, SA with independent reads, per-resource minus conventional, 1,078 instances. Intervals are 10,000-resample generation-seed-block bootstrap 95\% intervals over 90 blocks. Worse: fraction of instances in which per-resource calibration has the larger repaired gap.}\label{tab:budget}\centering\small
@@ -178,6 +178,31 @@ SA budget & Feasible rate (pp) & Repaired gap (pp) & Worse\\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\section{Sampler-configuration check and scope ablations}\label{sec:samplercheck}
+The sampler check solves the 1,078 evaluated instances with dwave-samplers SA (1,000 sweeps, default $\beta$ range, 100 reads in one call, which are independent) and OpenJij SQA (main-study settings, 100 reads each drawn as its own seeded call), one solver seed (101) and five calibrations, giving 10,780 runs. Table~\ref{tab:samplerlevels} gives the mean of each outcome per calibration. The non-trivial feasible rate counts only feasible reads that select at least one bundle; under these samplers it is within 0.8 pp of the raw feasible rate for every calibration, so the feasibility gains are not produced by empty allocations. Paired contrasts with bootstrap intervals for all five outcomes, including request conflicts and the fraction of instances in which each calibration is better, are in \texttt{sampler\_check\_summary.csv}; the main-text table reports three of them.
+
+\begin{table}[h]
+\caption{Sampler-configuration check: mean outcome per calibration over 1,078 instances. Feasibility in percent of reads, gap in percent of the CP-SAT reference, overload in resource units and conflicts in request conflicts per read. C: conventional, G: global, PR: per-resource, L: local-utility, PA: per-resource with per-pair request penalties.}\label{tab:samplerlevels}\centering\small
+\begin{tabular}{@{}llrrrrr@{}}
+\toprule
+Sampler & Calibration & Feasible & Non-trivial & Repaired gap & Overload & Conflicts\\
+\midrule
+SA & C & 38.01 & 37.22 & 6.21 & 0.081 & 1.060\\
+SA & G & 38.85 & 38.23 & 6.10 & 0.081 & 1.043\\
+SA & PR & 46.68 & 46.27 & 5.20 & 0.111 & 0.765\\
+SA & L & 41.56 & 40.93 & 5.26 & 0.108 & 0.921\\
+SA & PA & 20.50 & 20.23 & 4.48 & 0.183 & 1.769\\
+SQA & C & 22.61 & 22.12 & 5.01 & 2.257 & 1.462\\
+SQA & G & 23.58 & 23.28 & 4.93 & 2.238 & 1.441\\
+SQA & PR & 30.60 & 30.43 & 3.14 & 1.608 & 1.058\\
+SQA & L & 25.81 & 25.43 & 3.79 & 1.788 & 1.229\\
+SQA & PA & 9.86 & 9.79 & 2.18 & 2.091 & 2.317\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two features of these levels matter for interpretation. First, the absolute repaired gaps are an order of magnitude below those of the main study (86.30\% and 29.69\% for SA and SQA under conventional calibration), so the main study's large quality effects reflect a sampler that rarely gets close to the reference. Second, the per-pair penalties produce the lowest repaired gaps despite the lowest raw feasibility: their samples contain more request conflicts, which drop-only repair removes, and the repaired allocations end up closer to the reference. Raw feasibility and repaired quality can therefore move in opposite directions, and a calibration should be judged on both.
 
 \section{Reproducibility checklist}
 The final package records source and result SHA-256 hashes, Python and package versions, accelerator metadata, frozen CSV/JSON outputs and provenance notes. The penalty-calibration results are regenerated by \texttt{run\_penalty\_calibration\_heldout.py}, \texttt{analyze\_penalty\_calibration\_heldout.py} and \texttt{analyze\_penalty\_calibration\_mechanism.py}, the budget diagnostics by \texttt{run\_penalty\_calibration\_budget.py}, and the sampler-configuration check and scope ablations by \texttt{run\_penalty\_calibration\_sampler\_check.py}; the mapping from each output file to its generating script is in \texttt{QNet\_Sim/results/README.md}. The figures of the main text are regenerated from \texttt{SOURCE\_DATA} by \texttt{figures/make\_figures.py}. Manuscript claims use only artifacts that passed the freeze audit. Author names, affiliations, funding, CRediT contributions, competing-interest wording, repository DOI and archive DOI remain administrative placeholders to be completed before submission.
